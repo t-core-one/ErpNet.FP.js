@@ -1,20 +1,20 @@
-'use strict';
-
-const fs = require('fs');
-const path = require('path');
-const { ServiceController } = require('./Service/ServiceController');
-const { Provider } = require('./Provider/Provider');
-const { ComTransport } = require('./Transports/ComTransport');
-const { TcpTransport } = require('./Transports/TcpTransport');
-const { BgDatecsXIslFiscalPrinterDriver } = require('./Drivers/BgDatecs/BgDatecsXIslFiscalPrinter');
-const { BgDatecsPIslFiscalPrinterDriver } = require('./Drivers/BgDatecs/BgDatecsPIslFiscalPrinter');
-const { BgDatecsCIslFiscalPrinterDriver } = require('./Drivers/BgDatecs/BgDatecsCIslFiscalPrinter');
-const { BgEltradeIslFiscalPrinterDriver } = require('./Drivers/BgEltrade/BgEltradeIslFiscalPrinter');
-const { BgDaisyIslFiscalPrinterDriver } = require('./Drivers/BgDaisy/BgDaisyIslFiscalPrinter');
-const { BgIncotexIslFiscalPrinterDriver } = require('./Drivers/BgIncotex/BgIncotexIslFiscalPrinter');
-const { BgIslIcpFiscalPrinterDriver } = require('./Drivers/BgIsl/BgIslIcpFiscalPrinter');
-const { BgTremolZfpFiscalPrinterDriver } = require('./Drivers/BgTremol/BgTremolZfpFiscalPrinter');
-const { BgTremolZfpV2FiscalPrinterDriver } = require('./Drivers/BgTremol/BgTremolZfpV2FiscalPrinter');
+import fs from 'fs';
+import path from 'path';
+import logger from './logger.js';
+import { ServiceController } from './Service/ServiceController.js';
+import { ServiceOptions } from './Configuration/ServiceOptions.js';
+import { Provider } from './Provider/Provider.js';
+import { ComTransport } from './Transports/ComTransport.js';
+import { TcpTransport } from './Transports/TcpTransport.js';
+import { BgDatecsXIslFiscalPrinterDriver } from './Drivers/BgDatecs/BgDatecsXIslFiscalPrinter.js';
+import { BgDatecsPIslFiscalPrinterDriver } from './Drivers/BgDatecs/BgDatecsPIslFiscalPrinter.js';
+import { BgDatecsCIslFiscalPrinterDriver } from './Drivers/BgDatecs/BgDatecsCIslFiscalPrinter.js';
+import { BgEltradeIslFiscalPrinterDriver } from './Drivers/BgEltrade/BgEltradeIslFiscalPrinter.js';
+import { BgDaisyIslFiscalPrinterDriver } from './Drivers/BgDaisy/BgDaisyIslFiscalPrinter.js';
+import { BgIncotexIslFiscalPrinterDriver } from './Drivers/BgIncotex/BgIncotexIslFiscalPrinter.js';
+import { BgIslIcpFiscalPrinterDriver } from './Drivers/BgIsl/BgIslIcpFiscalPrinter.js';
+import { BgTremolZfpFiscalPrinterDriver } from './Drivers/BgTremol/BgTremolZfpFiscalPrinter.js';
+import { BgTremolZfpV2FiscalPrinterDriver } from './Drivers/BgTremol/BgTremolZfpV2FiscalPrinter.js';
 
 const APP_SETTINGS_FILE = path.join(process.cwd(), 'appsettings.json');
 
@@ -35,14 +35,13 @@ function saveConfig(configOptions) {
     json['ErpNet.FP'] = configOptions;
     fs.writeFileSync(APP_SETTINGS_FILE, JSON.stringify(json, null, 2), 'utf8');
   } catch (e) {
-    console.error('Failed to save config:', e.message);
+    logger.error(`Failed to save config: ${e.message}`);
   }
 }
 
-class ServiceSingleton extends ServiceController {
+export class ServiceSingleton extends ServiceController {
   constructor() {
     const configData = loadConfig();
-    const { ServiceOptions } = require('./Configuration/ServiceOptions');
     const opts = Object.assign(new ServiceOptions(), configData);
     super(opts);
   }
@@ -86,5 +85,3 @@ class ServiceSingleton extends ServiceController {
     saveConfig(this._configOptions);
   }
 }
-
-module.exports = { ServiceSingleton };

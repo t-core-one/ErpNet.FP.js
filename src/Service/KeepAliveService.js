@@ -1,8 +1,8 @@
-'use strict';
+import logger from '../logger.js';
 
 const KEEP_ALIVE_INTERVAL_MS = 120 * 1000;
 
-class KeepAliveService {
+export class KeepAliveService {
   constructor(serviceController) {
     this._serviceController = serviceController;
     this._timer = null;
@@ -22,15 +22,12 @@ class KeepAliveService {
 
   async _tick() {
     if (!this._serviceController.isReady) return;
-    const printers = this._serviceController.printers;
-    for (const [id, printer] of Object.entries(printers)) {
+    for (const [id, printer] of Object.entries(this._serviceController.printers)) {
       try {
         await printer.checkStatus();
       } catch (e) {
-        console.warn(`KeepAlive check failed for printer ${id}: ${e.message}`);
+        logger.warn(`KeepAlive check failed for printer ${id}: ${e.message}`);
       }
     }
   }
 }
-
-module.exports = { KeepAliveService };

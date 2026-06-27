@@ -1,14 +1,12 @@
-'use strict';
-
-const { BgIslFiscalPrinter, CMD } = require('../BgIslFiscalPrinter');
-const { DeviceInfo } = require('../../Core/DeviceInfo');
-const { FiscalPrinterDriver } = require('../../Core/FiscalPrinterDriver');
-const { InvalidDeviceInfoException } = require('../../Exceptions/InvalidDeviceInfoException');
+import { BgIslFiscalPrinter, CMD } from '../BgIslFiscalPrinter.js';
+import { DeviceInfo } from '../../Core/DeviceInfo.js';
+import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
+import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.p.isl';
 
-class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
+export class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
     this.info.CommentTextMaxLength = 46;
@@ -24,7 +22,7 @@ class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
   }
 }
 
-class BgDatecsPIslFiscalPrinterDriver extends FiscalPrinterDriver {
+export class BgDatecsPIslFiscalPrinterDriver extends FiscalPrinterDriver {
   get driverName() {
     return DRIVER_NAME;
   }
@@ -81,4 +79,3 @@ function parseDeviceInfo(rawDeviceInfo, autoDetect) {
   return info;
 }
 
-module.exports = { BgDatecsPIslFiscalPrinter, BgDatecsPIslFiscalPrinterDriver };

@@ -1,12 +1,11 @@
-'use strict';
+import { v4 as uuidv4 } from 'uuid';
+import logger from '../logger.js';
+import { Provider } from '../Provider/Provider.js';
+import { TaskStatus } from './TaskStatus.js';
+import { DEFAULT_TIMEOUT } from './PrintJob.js';
+import { ServiceOptions } from '../Configuration/ServiceOptions.js';
 
-const { v4: uuidv4 } = require('uuid');
-const { Provider } = require('../Provider/Provider');
-const { TaskStatus } = require('./TaskStatus');
-const { DEFAULT_TIMEOUT } = require('./PrintJob');
-const { ServiceOptions } = require('../Configuration/ServiceOptions');
-
-class ServiceController {
+export class ServiceController {
   constructor(configOptions) {
     this._configOptions = configOptions || new ServiceOptions();
     this._printers = {};
@@ -33,7 +32,6 @@ class ServiceController {
   }
 
   setupProvider() {
-    // Override in subclass to register drivers
     throw new Error('setupProvider must be implemented');
   }
 
@@ -43,7 +41,6 @@ class ServiceController {
     if (this._configOptions.AutoDetect) {
       await this.detect();
     } else {
-      // Connect configured printers only
       for (const [id, printerConfig] of Object.entries(this._configOptions.Printers || {})) {
         try {
           const printer = await this._provider.connect(printerConfig.Uri);
@@ -52,7 +49,7 @@ class ServiceController {
             this._printersInfo[id] = printer.info;
           }
         } catch (e) {
-          console.error(`Failed to connect configured printer ${id}: ${e.message}`);
+          logger.error(`Failed to connect configured printer ${id}: ${e.message}`);
         }
       }
     }
@@ -76,16 +73,14 @@ class ServiceController {
         }
       }
     } catch (e) {
-      console.error(`Detection failed: ${e.message}`);
+      logger.error(`Detection failed: ${e.message}`);
     }
     return this._printersInfo;
   }
 
   getTaskInfo(taskId) {
     const task = this._tasks[taskId];
-    if (!task) {
-      return { taskStatus: TaskStatus.Unknown, result: null };
-    }
+    if (!task) return { taskStatus: TaskStatus.Unknown, result: null };
     return { taskStatus: task.status, result: task.result };
   }
 
@@ -93,7 +88,6 @@ class ServiceController {
     const asyncTimeout = printJob.asyncTimeout || DEFAULT_TIMEOUT;
 
     if (printJob.taskId) {
-      // Check if this taskId already exists
       const existing = this._tasks[printJob.taskId];
       if (existing && existing.status === TaskStatus.Finished) {
         return { taskId: printJob.taskId };
@@ -103,33 +97,22 @@ class ServiceController {
     const taskId = printJob.taskId || uuidv4();
     printJob.taskId = taskId;
 
-    this._tasks[taskId] = {
-      status: TaskStatus.Enqueued,
-      result: null,
-    };
-
+    this._tasks[taskId] = { status: TaskStatus.Enqueued, result: null };
     this._taskQueue.push(printJob);
     this._processQueue();
 
-    // Wait up to asyncTimeout for the result
     const deadline = Date.now() + asyncTimeout;
     while (Date.now() < deadline) {
       const task = this._tasks[taskId];
-      if (task && task.status === TaskStatus.Finished) {
-        return task.result;
-      }
+      if (task && task.status === TaskStatus.Finished) return task.result;
       await new Promise(r => setTimeout(r, 50));
     }
 
-    // Timed out — return taskId for polling
-    if (this._tasks[taskId]) {
-      this._tasks[taskId].status = TaskStatus.Timeout;
-    }
+    if (this._tasks[taskId]) this._tasks[taskId].status = TaskStatus.Timeout;
     return { taskId };
   }
 
   _startTaskProcessor() {
-    // Task processor runs continuously
     this._processQueue();
   }
 
@@ -146,8 +129,7 @@ class ServiceController {
 
       task.status = TaskStatus.Running;
       try {
-        const result = await job.run();
-        task.result = result;
+        task.result = await job.run();
         task.status = TaskStatus.Finished;
       } catch (e) {
         task.result = { error: e.message };
@@ -167,9 +149,7 @@ class ServiceController {
   deletePrinter(id) {
     delete this._printers[id];
     delete this._printersInfo[id];
-    if (this._configOptions.Printers) {
-      delete this._configOptions.Printers[id];
-    }
+    if (this._configOptions.Printers) delete this._configOptions.Printers[id];
     this._writeOptions();
   }
 
@@ -205,13 +185,11 @@ class ServiceController {
     this._writeOptions();
   }
 
-  _writeOptions() {
-    // Override in subclass to persist config
-  }
+  _writeOptions() {}
 
   getServerVariables() {
     return {
-      version: require('../../package.json').version || '1.0.0',
+      version: '1.0.0',
       serverId: this.serverId,
       autoDetect: this._configOptions.AutoDetect,
       udpBeaconPort: this._configOptions.UdpBeaconPort || 0,
@@ -221,5 +199,3 @@ class ServiceController {
     };
   }
 }
-
-module.exports = { ServiceController };

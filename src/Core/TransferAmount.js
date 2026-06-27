@@ -1,12 +1,8 @@
-'use strict';
+import { Credentials } from './Credentials.js';
 
-const { Credentials } = require('./Credentials');
-
-class TransferAmount extends Credentials {
+export class TransferAmount extends Credentials {
   constructor() {
     super();
     this.Amount = 0;
   }
 }
-
-module.exports = { TransferAmount };

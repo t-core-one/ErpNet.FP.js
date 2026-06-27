@@ -1,6 +1,4 @@
-'use strict';
-
-class Transport {
+export class Transport {
   get transportName() {
     throw new Error('transportName must be implemented');
   }
@@ -17,5 +15,3 @@ class Transport {
     throw new Error('drop must be implemented');
   }
 }
-
-module.exports = { Transport };

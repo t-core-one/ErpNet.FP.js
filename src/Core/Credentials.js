@@ -1,10 +1,6 @@
-'use strict';
-
-class Credentials {
+export class Credentials {
   constructor() {
     this.Operator = '';
     this.OperatorPassword = '';
   }
 }
-
-module.exports = { Credentials };

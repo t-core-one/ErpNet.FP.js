@@ -1,18 +1,15 @@
-'use strict';
-
-const iconv = require('iconv-lite');
-const { BgFiscalPrinter } = require('./BgFiscalPrinter');
-const {
+import iconv from 'iconv-lite';
+import { BgFiscalPrinter } from './BgFiscalPrinter.js';
+import {
   DeviceStatusWithDateTime,
   DeviceStatusWithRawResponse,
   DeviceStatusWithCashAmount,
   DeviceStatusWithReceiptInfo,
-} = require('../Core/DeviceStatus');
-const { ItemType, PriceModifierType, TaxGroup } = require('../Core/Item');
-const { PaymentType } = require('../Core/Payment');
-const { ReversalReason } = require('../Core/ReversalReceipt');
-const { withMaxLength, wrapAtLength } = require('../Helpers/Helpers');
-const { InvalidResponseException } = require('../Exceptions/InvalidResponseException');
+} from '../Core/DeviceStatus.js';
+import { ItemType, PriceModifierType, TaxGroup } from '../Core/Item.js';
+import { PaymentType } from '../Core/Payment.js';
+import { withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
+import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
 
 // ─── Protocol constants ────────────────────────────────────────────────────
 const PREAMBLE   = 0x01;
@@ -45,7 +42,7 @@ const CMD = {
   ToPinpad:                   0x37,
 };
 
-class BgIslFiscalPrinter extends BgFiscalPrinter {
+export class BgIslFiscalPrinter extends BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
     this._sequenceNumber = 0x20;
@@ -477,4 +474,4 @@ class BgIslFiscalPrinter extends BgFiscalPrinter {
   }
 }
 
-module.exports = { BgIslFiscalPrinter, CMD };
+export { CMD };

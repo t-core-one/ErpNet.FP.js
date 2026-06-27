@@ -1,12 +1,8 @@
-'use strict';
+import { Credentials } from './Credentials.js';
 
-const { Credentials } = require('./Credentials');
-
-class CurrentDateTime extends Credentials {
+export class CurrentDateTime extends Credentials {
   constructor() {
     super();
     this.DeviceDateTime = null;
   }
 }
-
-module.exports = { CurrentDateTime };

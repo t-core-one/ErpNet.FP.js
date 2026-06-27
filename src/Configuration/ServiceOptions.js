@@ -1,19 +1,17 @@
-'use strict';
-
-class PrinterConfig {
+export class PrinterConfig {
   constructor() {
     this.Uri = '';
   }
 }
 
-class PrinterConfigWithId extends PrinterConfig {
+export class PrinterConfigWithId extends PrinterConfig {
   constructor() {
     super();
     this.Id = '';
   }
 }
 
-class PrinterProperties {
+export class PrinterProperties {
   constructor() {
     this.PaymentTypeMappings = {};
     this.PrinterConstants = {};
@@ -21,14 +19,14 @@ class PrinterProperties {
   }
 }
 
-class WebAccessOptions {
+export class WebAccessOptions {
   constructor() {
     this.AllowedOrigins = [];
     this.EnablePrivateNetwork = false;
   }
 }
 
-class ServiceOptions {
+export class ServiceOptions {
   constructor() {
     this.AutoDetect = true;
     this.ServerId = '';
@@ -71,11 +69,3 @@ class ServiceOptions {
     Object.assign(options, printerProps.PrinterOptions);
   }
 }
-
-module.exports = {
-  PrinterConfig,
-  PrinterConfigWithId,
-  PrinterProperties,
-  WebAccessOptions,
-  ServiceOptions,
-};

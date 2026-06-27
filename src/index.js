@@ -1,13 +1,12 @@
-'use strict';
-
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
-const express = require('express');
-const { ServiceSingleton } = require('./ServiceSingleton');
-const { KeepAliveService } = require('./Service/KeepAliveService');
-const printersRouter = require('./Routes/printers');
-const serviceRouter = require('./Routes/service');
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import express from 'express';
+import logger from './logger.js';
+import { ServiceSingleton } from './ServiceSingleton.js';
+import { KeepAliveService } from './Service/KeepAliveService.js';
+import printersRouter from './Routes/printers.js';
+import serviceRouter from './Routes/service.js';
 
 const APP_SETTINGS_FILE = path.join(process.cwd(), 'appsettings.json');
 
@@ -42,7 +41,6 @@ async function main() {
 
   const app = express();
 
-  // Middleware
   app.use(express.json({ limit: '500kb' }));
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -52,7 +50,6 @@ async function main() {
     next();
   });
 
-  // CORS for private network access (Chrome 94+)
   const webAccess = service.configOptions.WebAccess || {};
   if (webAccess.EnablePrivateNetwork) {
     app.use((req, res, next) => {
@@ -61,19 +58,17 @@ async function main() {
     });
   }
 
-  // Request logging
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
-      console.log(`${req.method} ${req.url} ${res.statusCode} (${Date.now() - start}ms)`);
+      logger.info(`${req.method} ${req.url} ${res.statusCode} (${Date.now() - start}ms)`);
     });
     next();
   });
 
-  // Attach service to app locals for route handlers
   app.locals.service = service;
 
-  // Routes — note: taskinfo must be registered before /:id
+  // taskinfo must be registered before /:id
   app.get('/printers/taskinfo', (req, res) => {
     const info = service.getTaskInfo(req.query.id);
     res.json(info);
@@ -82,12 +77,10 @@ async function main() {
   app.use('/printers', printersRouter);
   app.use('/service', serviceRouter);
 
-  // Health check
   app.get('/', (req, res) => {
-    res.json({ status: 'ok', version: require('../package.json').version });
+    res.json({ status: 'ok', version: '1.0.0' });
   });
 
-  // Start server
   const ssl = serverConfig.Ssl;
   if (ssl && ssl.CertFile && ssl.KeyFile) {
     const tlsOptions = {
@@ -95,39 +88,36 @@ async function main() {
       key: fs.readFileSync(ssl.KeyFile),
     };
     https.createServer(tlsOptions, app).listen(port, () => {
-      console.log(`ErpNet.FP service started on https://0.0.0.0:${port}`);
+      logger.info(`ErpNet.FP service started on https://0.0.0.0:${port}`);
     });
   } else {
     app.listen(port, () => {
-      console.log(`ErpNet.FP service started on http://0.0.0.0:${port}`);
+      logger.info(`ErpNet.FP service started on http://0.0.0.0:${port}`);
     });
   }
 
-  // Initialize service (detect printers, etc.)
-  console.log('Initializing fiscal printer service...');
+  logger.info('Initializing fiscal printer service...');
   service.setup().then(() => {
-    console.log(`Service ready. Printers found: ${Object.keys(service.printers).length}`);
+    logger.info(`Service ready. Printers found: ${Object.keys(service.printers).length}`);
     keepAlive.start();
   }).catch(err => {
-    console.error('Service setup failed:', err.message);
-    // Still mark as ready so admin endpoints work
+    logger.error(`Service setup failed: ${err.message}`);
     service._isReady = true;
   });
 
-  // Graceful shutdown
   process.on('SIGINT', () => {
-    console.log('Shutting down...');
+    logger.info('Shutting down...');
     keepAlive.stop();
     process.exit(0);
   });
   process.on('SIGTERM', () => {
-    console.log('Shutting down...');
+    logger.info('Shutting down...');
     keepAlive.stop();
     process.exit(0);
   });
 }
 
 main().catch(err => {
-  console.error('Fatal error:', err);
+  logger.error(`Fatal error: ${err.message}`);
   process.exit(1);
 });

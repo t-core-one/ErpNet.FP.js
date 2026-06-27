@@ -1,6 +1,4 @@
-'use strict';
-
-class ExpiringCache {
+export class ExpiringCache {
   constructor() {
     this._store = new Map();
   }
@@ -22,5 +20,3 @@ class ExpiringCache {
     return entry.value;
   }
 }
-
-module.exports = { ExpiringCache };

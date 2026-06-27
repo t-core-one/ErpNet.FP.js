@@ -1,6 +1,5 @@
-'use strict';
+import express from 'express';
 
-const express = require('express');
 const router = express.Router();
 
 function getService(req) {
@@ -97,4 +96,4 @@ router.post('/printers/delete', (req, res) => {
   res.json({ deleted: id });
 });
 
-module.exports = router;
+export default router;

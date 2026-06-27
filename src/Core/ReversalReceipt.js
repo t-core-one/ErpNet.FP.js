@@ -1,14 +1,12 @@
-'use strict';
+import { Receipt } from './Receipt.js';
 
-const { Receipt } = require('./Receipt');
-
-const ReversalReason = Object.freeze({
+export const ReversalReason = Object.freeze({
   OperatorError: 1,
   Refund: 2,
   TaxBaseReduction: 3,
 });
 
-class ReversalReceipt extends Receipt {
+export class ReversalReceipt extends Receipt {
   constructor() {
     super();
     this.ReceiptNumber = '';
@@ -25,5 +23,3 @@ class ReversalReceipt extends Receipt {
     this.Payments = receipt.Payments ? receipt.Payments.slice() : [];
   }
 }
-
-module.exports = { ReversalReason, ReversalReceipt };

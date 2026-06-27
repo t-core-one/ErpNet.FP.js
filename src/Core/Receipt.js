@@ -1,8 +1,6 @@
-'use strict';
+import { Credentials } from './Credentials.js';
 
-const { Credentials } = require('./Credentials');
-
-class Receipt extends Credentials {
+export class Receipt extends Credentials {
   constructor() {
     super();
     this.UniqueSaleNumber = '';
@@ -10,5 +8,3 @@ class Receipt extends Credentials {
     this.Payments = [];
   }
 }
-
-module.exports = { Receipt };

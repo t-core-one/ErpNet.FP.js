@@ -1,13 +1,11 @@
-'use strict';
-
-const { Transport } = require('../Core/Transport');
+import { SerialPort } from 'serialport';
+import { Transport } from '../Core/Transport.js';
 
 const DEFAULT_BAUD_RATE = 115200;
-const FALLBACK_BAUD_RATE = 9600;
 const IDLE_TIMEOUT_MS = 3000;
 const READ_TIMEOUT_MS = 500;
 
-class ComChannel {
+export class ComChannel {
   constructor(portPath, baudRate = DEFAULT_BAUD_RATE) {
     this._portPath = portPath;
     this._baudRate = baudRate;
@@ -22,7 +20,6 @@ class ComChannel {
 
   async open() {
     if (this._port && this._port.isOpen) return;
-    const { SerialPort } = require('serialport');
     this._port = new SerialPort({
       path: this._portPath,
       baudRate: this._baudRate,
@@ -61,7 +58,7 @@ class ComChannel {
   }
 
   async read() {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const deadline = Date.now() + READ_TIMEOUT_MS;
       const poll = () => {
         if (this._buffer.length > 0) {
@@ -81,7 +78,7 @@ class ComChannel {
   }
 }
 
-class ComTransport extends Transport {
+export class ComTransport extends Transport {
   constructor() {
     super();
     this._openedChannels = new Map();
@@ -93,7 +90,6 @@ class ComTransport extends Transport {
 
   async getAvailableAddresses() {
     try {
-      const { SerialPort } = require('serialport');
       const ports = await SerialPort.list();
       return ports.map(p => p.path);
     } catch (e) {
@@ -116,5 +112,3 @@ class ComTransport extends Transport {
     channel.close();
   }
 }
-
-module.exports = { ComTransport, ComChannel };

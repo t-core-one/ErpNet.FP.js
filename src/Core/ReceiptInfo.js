@@ -1,6 +1,4 @@
-'use strict';
-
-class ReceiptInfo {
+export class ReceiptInfo {
   constructor() {
     this.ReceiptNumber = '';
     this.ReceiptDateTime = null;
@@ -8,5 +6,3 @@ class ReceiptInfo {
     this.FiscalMemorySerialNumber = '';
   }
 }
-
-module.exports = { ReceiptInfo };

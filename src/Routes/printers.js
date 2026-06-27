@@ -1,9 +1,8 @@
-'use strict';
+import express from 'express';
+import { PrintJob, PrintJobAction, DEFAULT_TIMEOUT } from '../Service/PrintJob.js';
+import { parseTimeout } from '../Helpers/Helpers.js';
 
-const express = require('express');
 const router = express.Router();
-const { PrintJob, PrintJobAction, DEFAULT_TIMEOUT } = require('../Service/PrintJob');
-const { parseTimeout } = require('../Helpers/Helpers');
 
 function getService(req) {
   return req.app.locals.service;
@@ -60,13 +59,6 @@ router.get('/:id/cash', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-// GET /printers/taskinfo
-router.get('/taskinfo', (req, res) => {
-  const service = getService(req);
-  const info = service.getTaskInfo(req.query.id);
-  res.json(info);
 });
 
 // POST /printers/:id/rawrequest
@@ -259,4 +251,4 @@ router.post('/:id/reset', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

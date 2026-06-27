@@ -1,14 +1,6 @@
-'use strict';
+import { ExpiringCache } from '../Helpers/ExpiringCache.js';
 
-const { ExpiringCache } = require('../Helpers/ExpiringCache');
-
-class FiscalPrinterDriver {
-  constructor() {
-    if (!FiscalPrinterDriver._cache) {
-      FiscalPrinterDriver._cache = new ExpiringCache();
-    }
-  }
-
+export class FiscalPrinterDriver {
   get cache() {
     return FiscalPrinterDriver._cache;
   }
@@ -23,5 +15,3 @@ class FiscalPrinterDriver {
 }
 
 FiscalPrinterDriver._cache = new ExpiringCache();
-
-module.exports = { FiscalPrinterDriver };

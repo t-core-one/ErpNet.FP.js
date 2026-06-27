@@ -1,16 +1,13 @@
-'use strict';
-
-const iconv = require('iconv-lite');
-const { DeviceInfo } = require('../Core/DeviceInfo');
-const { DeviceStatusWithReceiptInfo } = require('../Core/DeviceStatus');
-const { PaymentType } = require('../Core/Payment');
-const { ItemType, PriceModifierType } = require('../Core/Item');
-const { ReversalReason } = require('../Core/ReversalReceipt');
-const { StandardizedStatusMessageException } = require('../Exceptions/StandardizedStatusMessageException');
+import iconv from 'iconv-lite';
+import { DeviceInfo } from '../Core/DeviceInfo.js';
+import { DeviceStatusWithReceiptInfo } from '../Core/DeviceStatus.js';
+import { PaymentType } from '../Core/Payment.js';
+import { ItemType, PriceModifierType } from '../Core/Item.js';
+import { ReversalReason } from '../Core/ReversalReceipt.js';
 
 const USN_REGEX = /^[A-Z]{2}[0-9]{6}-[A-Z0-9]{4}-[0-9]{7}$/;
 
-class BgFiscalPrinter {
+export class BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     this._channel = channel;
     this._serviceOptions = serviceOptions;
@@ -106,9 +103,7 @@ class BgFiscalPrinter {
     return status;
   }
 
-  setDeadLine(deadLine) {
-    // Base implementation - no-op; override in printer subclasses if supported
-  }
+  setDeadLine(deadLine) {}
 
   checkStatus() { throw new Error('checkStatus must be implemented'); }
   cash() { throw new Error('cash must be implemented'); }
@@ -123,5 +118,3 @@ class BgFiscalPrinter {
   rawRequest(requestFrame) { throw new Error('rawRequest must be implemented'); }
   reset(credentials) { throw new Error('reset must be implemented'); }
 }
-
-module.exports = { BgFiscalPrinter };

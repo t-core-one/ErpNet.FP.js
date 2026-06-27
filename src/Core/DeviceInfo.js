@@ -1,6 +1,4 @@
-'use strict';
-
-class DeviceInfo {
+export class DeviceInfo {
   constructor() {
     this.Uri = '';
     this.SerialNumber = '';
@@ -18,5 +16,3 @@ class DeviceInfo {
     this.UsePaymentTerminal = false;
   }
 }
-
-module.exports = { DeviceInfo };

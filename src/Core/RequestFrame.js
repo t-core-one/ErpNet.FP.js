@@ -1,9 +1,5 @@
-'use strict';
-
-class RequestFrame {
+export class RequestFrame {
   constructor() {
     this.RawRequest = '';
   }
 }
-
-module.exports = { RequestFrame };

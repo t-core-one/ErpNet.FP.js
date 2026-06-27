@@ -1,15 +1,12 @@
-'use strict';
-
-const { BgIcpFiscalPrinter } = require('../BgIcpFiscalPrinter');
-const { DeviceInfo } = require('../../Core/DeviceInfo');
-const { FiscalPrinterDriver } = require('../../Core/FiscalPrinterDriver');
-const { InvalidDeviceInfoException } = require('../../Exceptions/InvalidDeviceInfoException');
-const iconv = require('iconv-lite');
+import { BgIcpFiscalPrinter } from '../BgIcpFiscalPrinter.js';
+import { DeviceInfo } from '../../Core/DeviceInfo.js';
+import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
+import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
 
 const SERIAL_NUMBER_PREFIX = 'IS';
 const DRIVER_NAME = 'bg.is.icp';
 
-class BgIslIcpFiscalPrinter extends BgIcpFiscalPrinter {
+export class BgIslIcpFiscalPrinter extends BgIcpFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
   }
@@ -22,7 +19,7 @@ class BgIslIcpFiscalPrinter extends BgIcpFiscalPrinter {
   }
 }
 
-class BgIslIcpFiscalPrinterDriver extends FiscalPrinterDriver {
+export class BgIslIcpFiscalPrinterDriver extends FiscalPrinterDriver {
   get driverName() {
     return DRIVER_NAME;
   }
@@ -102,4 +99,3 @@ function parseDeviceInfo(rawDeviceInfo, autoDetect) {
   return info;
 }
 
-module.exports = { BgIslIcpFiscalPrinter, BgIslIcpFiscalPrinterDriver };

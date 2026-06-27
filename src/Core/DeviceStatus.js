@@ -1,6 +1,4 @@
-'use strict';
-
-const StatusMessageType = Object.freeze({
+export const StatusMessageType = Object.freeze({
   Unknown: 'unknown',
   Reserved: 'reserved',
   Info: 'info',
@@ -8,7 +6,7 @@ const StatusMessageType = Object.freeze({
   Error: 'error',
 });
 
-class StatusMessage {
+export class StatusMessage {
   constructor(type, code, text) {
     this.Type = type;
     this.Code = code;
@@ -16,7 +14,7 @@ class StatusMessage {
   }
 }
 
-class DeviceStatus {
+export class DeviceStatus {
   constructor() {
     this.Ok = true;
     this.Messages = [];
@@ -43,28 +41,28 @@ class DeviceStatus {
   }
 }
 
-class DeviceStatusWithDateTime extends DeviceStatus {
+export class DeviceStatusWithDateTime extends DeviceStatus {
   constructor() {
     super();
     this.DeviceDateTime = null;
   }
 }
 
-class DeviceStatusWithRawResponse extends DeviceStatus {
+export class DeviceStatusWithRawResponse extends DeviceStatus {
   constructor() {
     super();
     this.RawResponse = '';
   }
 }
 
-class DeviceStatusWithCashAmount extends DeviceStatus {
+export class DeviceStatusWithCashAmount extends DeviceStatus {
   constructor() {
     super();
     this.Amount = 0;
   }
 }
 
-class DeviceStatusWithReceiptInfo extends DeviceStatus {
+export class DeviceStatusWithReceiptInfo extends DeviceStatus {
   constructor() {
     super();
     this.ReceiptNumber = '';
@@ -73,13 +71,3 @@ class DeviceStatusWithReceiptInfo extends DeviceStatus {
     this.FiscalMemorySerialNumber = '';
   }
 }
-
-module.exports = {
-  StatusMessageType,
-  StatusMessage,
-  DeviceStatus,
-  DeviceStatusWithDateTime,
-  DeviceStatusWithRawResponse,
-  DeviceStatusWithCashAmount,
-  DeviceStatusWithReceiptInfo,
-};

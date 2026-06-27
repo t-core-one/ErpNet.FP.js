@@ -1,18 +1,15 @@
-'use strict';
-
-const iconv = require('iconv-lite');
-const { BgFiscalPrinter } = require('./BgFiscalPrinter');
-const {
+import iconv from 'iconv-lite';
+import { BgFiscalPrinter } from './BgFiscalPrinter.js';
+import {
   DeviceStatusWithDateTime,
   DeviceStatusWithRawResponse,
   DeviceStatusWithCashAmount,
   DeviceStatusWithReceiptInfo,
-} = require('../Core/DeviceStatus');
-const { ItemType, PriceModifierType, TaxGroup } = require('../Core/Item');
-const { PaymentType } = require('../Core/Payment');
-const { ReversalReason } = require('../Core/ReversalReceipt');
-const { withMaxLength, wrapAtLength } = require('../Helpers/Helpers');
-const { InvalidResponseException } = require('../Exceptions/InvalidResponseException');
+} from '../Core/DeviceStatus.js';
+import { ItemType, PriceModifierType, TaxGroup } from '../Core/Item.js';
+import { PaymentType } from '../Core/Payment.js';
+import { withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
+import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
 
 // ─── Protocol constants ────────────────────────────────────────────────────
 const STX  = 0x02;
@@ -42,7 +39,7 @@ function icpDecimal(value, intDigits, fracDigits) {
   return str.padStart(intDigits + fracDigits, '0');
 }
 
-class BgIcpFiscalPrinter extends BgFiscalPrinter {
+export class BgIcpFiscalPrinter extends BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
     this._deviceNo = Buffer.from([0x00, 0x00, 0x00, 0x00]);
@@ -455,4 +452,4 @@ class BgIcpFiscalPrinter extends BgFiscalPrinter {
   }
 }
 
-module.exports = { BgIcpFiscalPrinter, icpDecimal };
+export { icpDecimal };

@@ -1,17 +1,15 @@
-'use strict';
-
-const iconv = require('iconv-lite');
-const { BgIslFiscalPrinter, CMD } = require('../BgIslFiscalPrinter');
-const { DeviceInfo } = require('../../Core/DeviceInfo');
-const { FiscalPrinterDriver } = require('../../Core/FiscalPrinterDriver');
-const { InvalidDeviceInfoException } = require('../../Exceptions/InvalidDeviceInfoException');
-const {
+import iconv from 'iconv-lite';
+import { BgIslFiscalPrinter, CMD } from '../BgIslFiscalPrinter.js';
+import { DeviceInfo } from '../../Core/DeviceInfo.js';
+import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
+import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
+import {
   DeviceStatusWithCashAmount,
   DeviceStatusWithReceiptInfo,
-} = require('../../Core/DeviceStatus');
-const { ItemType, PriceModifierType, TaxGroup } = require('../../Core/Item');
-const { PaymentType } = require('../../Core/Payment');
-const { withMaxLength, wrapAtLength } = require('../../Helpers/Helpers');
+} from '../../Core/DeviceStatus.js';
+import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
+import { PaymentType } from '../../Core/Payment.js';
+import { withMaxLength, wrapAtLength } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIX = 'DY';
 const DRIVER_NAME = 'bg.dy.isl';
@@ -20,7 +18,7 @@ const DAISY_CMD_GET_DEVICE_CONSTANTS = 0x80;
 const DAISY_CMD_ABORT_FISCAL_RECEIPT = 0x82;
 const DAISY_CMD_FISCAL_RECEIPT_SALE_DEPARTMENT = 0x8A;
 
-class BgDaisyIslFiscalPrinter extends BgIslFiscalPrinter {
+export class BgDaisyIslFiscalPrinter extends BgIslFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
 
@@ -119,7 +117,7 @@ class BgDaisyIslFiscalPrinter extends BgIslFiscalPrinter {
   }
 }
 
-class BgDaisyIslFiscalPrinterDriver extends FiscalPrinterDriver {
+export class BgDaisyIslFiscalPrinterDriver extends FiscalPrinterDriver {
   get driverName() {
     return DRIVER_NAME;
   }
@@ -190,4 +188,3 @@ function parseDeviceInfo(rawDeviceInfo, rawConstants, autoDetect) {
   return info;
 }
 
-module.exports = { BgDaisyIslFiscalPrinter, BgDaisyIslFiscalPrinterDriver };

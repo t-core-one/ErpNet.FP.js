@@ -1,24 +1,22 @@
-'use strict';
-
-const iconv = require('iconv-lite');
-const { BgIslFiscalPrinter, CMD } = require('../BgIslFiscalPrinter');
-const { DeviceInfo } = require('../../Core/DeviceInfo');
-const { FiscalPrinterDriver } = require('../../Core/FiscalPrinterDriver');
-const { InvalidDeviceInfoException } = require('../../Exceptions/InvalidDeviceInfoException');
-const {
+import iconv from 'iconv-lite';
+import { BgIslFiscalPrinter, CMD } from '../BgIslFiscalPrinter.js';
+import { DeviceInfo } from '../../Core/DeviceInfo.js';
+import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
+import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
+import {
   DeviceStatusWithCashAmount,
   DeviceStatusWithReceiptInfo,
-} = require('../../Core/DeviceStatus');
-const { ItemType, PriceModifierType, TaxGroup } = require('../../Core/Item');
-const { PaymentType } = require('../../Core/Payment');
-const { withMaxLength, wrapAtLength } = require('../../Helpers/Helpers');
+} from '../../Core/DeviceStatus.js';
+import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
+import { PaymentType } from '../../Core/Payment.js';
+import { withMaxLength, wrapAtLength } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIX = 'IN';
 const DRIVER_NAME = 'bg.in.isl';
 
 const INCOTEX_CMD_ABORT_FISCAL_RECEIPT = 0x82;
 
-class BgIncotexIslFiscalPrinter extends BgIslFiscalPrinter {
+export class BgIncotexIslFiscalPrinter extends BgIslFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
 
@@ -130,7 +128,7 @@ class BgIncotexIslFiscalPrinter extends BgIslFiscalPrinter {
   }
 }
 
-class BgIncotexIslFiscalPrinterDriver extends FiscalPrinterDriver {
+export class BgIncotexIslFiscalPrinterDriver extends FiscalPrinterDriver {
   get driverName() {
     return DRIVER_NAME;
   }
@@ -187,4 +185,3 @@ function parseDeviceInfo(rawDeviceInfo, autoDetect) {
   return info;
 }
 
-module.exports = { BgIncotexIslFiscalPrinter, BgIncotexIslFiscalPrinterDriver };

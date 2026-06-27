@@ -1,6 +1,4 @@
-'use strict';
-
-const PaymentType = Object.freeze({
+export const PaymentType = Object.freeze({
   Unspecified: 0,
   Cash: 1,
   Check: 2,
@@ -16,11 +14,9 @@ const PaymentType = Object.freeze({
   Change: -1,
 });
 
-class Payment {
+export class Payment {
   constructor() {
     this.PaymentType = PaymentType.Cash;
     this.Amount = 0;
   }
 }
-
-module.exports = { PaymentType, Payment };

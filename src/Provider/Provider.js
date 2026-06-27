@@ -1,8 +1,7 @@
-'use strict';
+import logger from '../logger.js';
+import { parseTimeout } from '../Helpers/Helpers.js';
 
-const { parseTimeout } = require('../Helpers/Helpers');
-
-class Provider {
+export class Provider {
   constructor(serviceOptions) {
     this._serviceOptions = serviceOptions;
     this._drivers = new Map();
@@ -23,7 +22,7 @@ class Provider {
     );
 
     const addressMap = new Map();
-    for (const [key, { driver, transport }] of this._drivers) {
+    for (const [, { driver, transport }] of this._drivers) {
       const addresses = await transport.getAvailableAddresses();
       for (const address of addresses) {
         if (excludedPorts.includes(address)) continue;
@@ -56,10 +55,11 @@ class Provider {
           const uri = `${driver.driverName}://${address}`;
           printer.info.Uri = uri;
           printers[uri] = printer;
+          logger.info(`Detected printer: ${uri} (${printer.info.Manufacturer} ${printer.info.Model} SN:${printer.info.SerialNumber})`);
           return;
         }
       } catch (e) {
-        // not this driver
+        logger.debug(`${driver.driverName} @ ${address}: ${e.message}`);
       } finally {
         if (channel) {
           try { transport.drop(channel); } catch (_) {}
@@ -73,7 +73,7 @@ class Provider {
     if (!match) throw new Error(`Invalid device URI: ${deviceUri}`);
     const [, protocol, address] = match;
 
-    for (const [key, { driver, transport }] of this._drivers) {
+    for (const [, { driver, transport }] of this._drivers) {
       if (driver.driverName === protocol) {
         const channel = transport.openChannel(address);
         const printer = driver.connect(channel, this._serviceOptions, false, null);
@@ -86,5 +86,3 @@ class Provider {
     throw new Error(`No driver found for protocol: ${protocol}`);
   }
 }
-
-module.exports = { Provider };

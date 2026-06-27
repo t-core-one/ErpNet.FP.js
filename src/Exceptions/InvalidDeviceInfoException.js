@@ -1,12 +1,8 @@
-'use strict';
+import { FiscalPrinterException } from './FiscalPrinterException.js';
 
-const { FiscalPrinterException } = require('./FiscalPrinterException');
-
-class InvalidDeviceInfoException extends FiscalPrinterException {
+export class InvalidDeviceInfoException extends FiscalPrinterException {
   constructor(message) {
     super(message || 'Invalid device info');
     this.name = 'InvalidDeviceInfoException';
   }
 }
-
-module.exports = { InvalidDeviceInfoException };

@@ -1,13 +1,11 @@
-'use strict';
-
-const net = require('net');
-const { Transport } = require('../Core/Transport');
+import net from 'net';
+import { Transport } from '../Core/Transport.js';
 
 const DEFAULT_PORT = 9100;
 const CONNECT_TIMEOUT_MS = 2000;
 const READ_TIMEOUT_MS = 1000;
 
-class TcpChannel {
+export class TcpChannel {
   constructor(hostName, port) {
     this._hostName = hostName;
     this._port = port;
@@ -80,7 +78,7 @@ class TcpChannel {
   }
 }
 
-class TcpTransport extends Transport {
+export class TcpTransport extends Transport {
   constructor() {
     super();
     this._openedChannels = new Map();
@@ -116,5 +114,3 @@ class TcpTransport extends Transport {
     channel.close();
   }
 }
-
-module.exports = { TcpTransport, TcpChannel };

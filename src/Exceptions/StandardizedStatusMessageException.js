@@ -1,8 +1,6 @@
-'use strict';
+import { FiscalPrinterException } from './FiscalPrinterException.js';
 
-const { FiscalPrinterException } = require('./FiscalPrinterException');
-
-class StandardizedStatusMessageException extends FiscalPrinterException {
+export class StandardizedStatusMessageException extends FiscalPrinterException {
   constructor(code, type, message) {
     super(message || `Standardized status message: [${type}] ${code}`);
     this.name = 'StandardizedStatusMessageException';
@@ -10,5 +8,3 @@ class StandardizedStatusMessageException extends FiscalPrinterException {
     this.type = type;
   }
 }
-
-module.exports = { StandardizedStatusMessageException };

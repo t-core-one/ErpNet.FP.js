@@ -1,6 +1,4 @@
-'use strict';
-
-const ItemType = Object.freeze({
+export const ItemType = Object.freeze({
   Sale: 'sale',
   Comment: 'comment',
   FooterComment: 'footer-comment',
@@ -8,7 +6,7 @@ const ItemType = Object.freeze({
   DiscountAmount: 'discount-amount',
 });
 
-const PriceModifierType = Object.freeze({
+export const PriceModifierType = Object.freeze({
   None: 0,
   DiscountPercent: 1,
   DiscountAmount: 2,
@@ -16,7 +14,7 @@ const PriceModifierType = Object.freeze({
   SurchargeAmount: 4,
 });
 
-const TaxGroup = Object.freeze({
+export const TaxGroup = Object.freeze({
   Unspecified: 0,
   TaxGroup1: 1,
   TaxGroup2: 2,
@@ -28,7 +26,7 @@ const TaxGroup = Object.freeze({
   TaxGroup8: 8,
 });
 
-class Item {
+export class Item {
   constructor() {
     this.ItemCode = null;
     this.Type = ItemType.Sale;
@@ -42,5 +40,3 @@ class Item {
     this.PriceModifierType = PriceModifierType.None;
   }
 }
-
-module.exports = { ItemType, PriceModifierType, TaxGroup, Item };
