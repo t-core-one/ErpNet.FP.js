@@ -122,7 +122,7 @@ export class BgDaisyIslFiscalPrinterDriver extends FiscalPrinterDriver {
     return DRIVER_NAME;
   }
 
-  connect(channel, serviceOptions, autoDetect = true, options = null) {
+  async connect(channel, serviceOptions, autoDetect = true, options = null) {
     const printer = new BgDaisyIslFiscalPrinter(channel, serviceOptions, options);
     const cacheKey = `isl.${channel.descriptor}.${DRIVER_NAME}`;
 
@@ -134,17 +134,16 @@ export class BgDaisyIslFiscalPrinterDriver extends FiscalPrinterDriver {
       return printer;
     }
 
-    return Promise.all([
+    const [rawDeviceInfo, rawConstants] = await Promise.all([
       printer.getRawDeviceInfo(),
       printer.getRawDeviceConstants(),
-    ]).then(([rawDeviceInfo, rawConstants]) => {
-      printer.info = parseDeviceInfo(rawDeviceInfo, rawConstants, autoDetect);
-      this.cache.store(cacheKey, printer.info, 30000);
-      printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
-      printer.info.SupportsSubTotalAmountModifiers = true;
-      if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
-      return printer;
-    });
+    ]);
+    printer.info = parseDeviceInfo(rawDeviceInfo, rawConstants, autoDetect);
+    this.cache.store(cacheKey, printer.info, 30000);
+    printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
+    printer.info.SupportsSubTotalAmountModifiers = true;
+    if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
+    return printer;
   }
 }
 

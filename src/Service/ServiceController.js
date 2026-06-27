@@ -1,5 +1,10 @@
+import { readFileSync } from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../logger.js';
+
+const { version: SERVER_VERSION } = JSON.parse(
+  readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+);
 import { Provider } from '../Provider/Provider.js';
 import { TaskStatus } from './TaskStatus.js';
 import { DEFAULT_TIMEOUT } from './PrintJob.js';
@@ -189,7 +194,7 @@ export class ServiceController {
 
   getServerVariables() {
     return {
-      version: '1.0.0',
+      version: SERVER_VERSION,
       serverId: this.serverId,
       autoDetect: this._configOptions.AutoDetect,
       udpBeaconPort: this._configOptions.UdpBeaconPort || 0,

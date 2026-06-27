@@ -22,7 +22,7 @@ export class BgTremolZfpFiscalPrinter extends BgZfpFiscalPrinter {
 export class BgTremolZfpFiscalPrinterDriver extends FiscalPrinterDriver {
   get driverName() { return DRIVER_NAME; }
 
-  connect(channel, serviceOptions, autoDetect = true, options = null) {
+  async connect(channel, serviceOptions, autoDetect = true, options = null) {
     const printer = new BgTremolZfpFiscalPrinter(channel, serviceOptions, options);
     const cacheKey = `zfp.${channel.descriptor}.${DRIVER_NAME}`;
 
@@ -35,14 +35,13 @@ export class BgTremolZfpFiscalPrinterDriver extends FiscalPrinterDriver {
       return printer;
     }
 
-    return printer.getRawDeviceInfo().then(([versionStr, extraStr]) => {
-      this.cache.store(cacheKey, versionStr, 30000);
-      printer.info = parseDeviceInfo(versionStr, extraStr, autoDetect);
-      printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
-      printer.info.SupportsSubTotalAmountModifiers = true;
-      if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
-      return printer;
-    });
+    const [versionStr, extraStr] = await printer.getRawDeviceInfo();
+    this.cache.store(cacheKey, versionStr, 30000);
+    printer.info = parseDeviceInfo(versionStr, extraStr, autoDetect);
+    printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
+    printer.info.SupportsSubTotalAmountModifiers = true;
+    if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
+    return printer;
   }
 }
 

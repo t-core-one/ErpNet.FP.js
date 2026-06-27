@@ -68,7 +68,7 @@ export class Provider {
     }
   }
 
-  connect(deviceUri) {
+  async connect(deviceUri) {
     const match = deviceUri.match(/^([^:]+):\/\/(.+)$/);
     if (!match) throw new Error(`Invalid device URI: ${deviceUri}`);
     const [, protocol, address] = match;
@@ -76,7 +76,7 @@ export class Provider {
     for (const [, { driver, transport }] of this._drivers) {
       if (driver.driverName === protocol) {
         const channel = transport.openChannel(address);
-        const printer = driver.connect(channel, this._serviceOptions, false, null);
+        const printer = await driver.connect(channel, this._serviceOptions, false, null);
         if (printer && printer.info) {
           printer.info.Uri = deviceUri;
         }

@@ -133,7 +133,7 @@ export class BgIncotexIslFiscalPrinterDriver extends FiscalPrinterDriver {
     return DRIVER_NAME;
   }
 
-  connect(channel, serviceOptions, autoDetect = true, options = null) {
+  async connect(channel, serviceOptions, autoDetect = true, options = null) {
     const printer = new BgIncotexIslFiscalPrinter(channel, serviceOptions, options);
     const cacheKey = `isl.${channel.descriptor}.${DRIVER_NAME}`;
 
@@ -145,14 +145,13 @@ export class BgIncotexIslFiscalPrinterDriver extends FiscalPrinterDriver {
       return printer;
     }
 
-    return printer.getRawDeviceInfo().then(rawDeviceInfo => {
-      this.cache.store(cacheKey, rawDeviceInfo, 30000);
-      printer.info = parseDeviceInfo(rawDeviceInfo, autoDetect);
-      printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
-      printer.info.SupportsSubTotalAmountModifiers = false;
-      if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
-      return printer;
-    });
+    const rawDeviceInfo = await printer.getRawDeviceInfo();
+    this.cache.store(cacheKey, rawDeviceInfo, 30000);
+    printer.info = parseDeviceInfo(rawDeviceInfo, autoDetect);
+    printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
+    printer.info.SupportsSubTotalAmountModifiers = false;
+    if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
+    return printer;
   }
 }
 

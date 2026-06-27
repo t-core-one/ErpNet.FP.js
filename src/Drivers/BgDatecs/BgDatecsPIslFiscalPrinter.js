@@ -1,4 +1,4 @@
-import { BgIslFiscalPrinter, CMD } from '../BgIslFiscalPrinter.js';
+import { BgIslFiscalPrinter } from '../BgIslFiscalPrinter.js';
 import { DeviceInfo } from '../../Core/DeviceInfo.js';
 import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
 import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
@@ -27,7 +27,7 @@ export class BgDatecsPIslFiscalPrinterDriver extends FiscalPrinterDriver {
     return DRIVER_NAME;
   }
 
-  connect(channel, serviceOptions, autoDetect = true, options = null) {
+  async connect(channel, serviceOptions, autoDetect = true, options = null) {
     const printer = new BgDatecsPIslFiscalPrinter(channel, serviceOptions, options);
     const cacheKey = `isl.${channel.descriptor}.${DRIVER_NAME}`;
 
@@ -40,14 +40,13 @@ export class BgDatecsPIslFiscalPrinterDriver extends FiscalPrinterDriver {
       return printer;
     }
 
-    return printer.getRawDeviceInfo().then(rawDeviceInfo => {
-      this.cache.store(cacheKey, rawDeviceInfo, 30000);
-      printer.info = parseDeviceInfo(rawDeviceInfo, autoDetect);
-      printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
-      printer.info.SupportsSubTotalAmountModifiers = false;
-      if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
-      return printer;
-    });
+    const rawDeviceInfo = await printer.getRawDeviceInfo();
+    this.cache.store(cacheKey, rawDeviceInfo, 30000);
+    printer.info = parseDeviceInfo(rawDeviceInfo, autoDetect);
+    printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
+    printer.info.SupportsSubTotalAmountModifiers = false;
+    if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
+    return printer;
   }
 }
 

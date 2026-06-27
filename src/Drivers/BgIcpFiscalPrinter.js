@@ -452,4 +452,3 @@ export class BgIcpFiscalPrinter extends BgFiscalPrinter {
   }
 }
 
-export { icpDecimal };

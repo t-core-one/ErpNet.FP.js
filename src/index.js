@@ -1,5 +1,10 @@
+import { readFileSync } from 'fs';
 import fs from 'fs';
 import path from 'path';
+
+const { version: SERVER_VERSION } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+);
 import https from 'https';
 import express from 'express';
 import logger from './logger.js';
@@ -78,7 +83,7 @@ async function main() {
   app.use('/service', serviceRouter);
 
   app.get('/', (req, res) => {
-    res.json({ status: 'ok', version: '1.0.0' });
+    res.json({ status: 'ok', version: SERVER_VERSION });
   });
 
   const ssl = serverConfig.Ssl;

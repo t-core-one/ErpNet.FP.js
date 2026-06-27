@@ -58,22 +58,24 @@ export class ComChannel {
   }
 
   async read() {
+    if (this._buffer.length > 0) {
+      const data = this._buffer;
+      this._buffer = Buffer.alloc(0);
+      return data;
+    }
     return new Promise((resolve) => {
-      const deadline = Date.now() + READ_TIMEOUT_MS;
-      const poll = () => {
-        if (this._buffer.length > 0) {
-          const data = this._buffer;
-          this._buffer = Buffer.alloc(0);
-          resolve(data);
-          return;
-        }
-        if (Date.now() >= deadline) {
-          resolve(Buffer.alloc(0));
-          return;
-        }
-        setTimeout(poll, 10);
+      const timer = setTimeout(() => {
+        this._port.off('data', onData);
+        resolve(Buffer.alloc(0));
+      }, READ_TIMEOUT_MS);
+      const onData = () => {
+        clearTimeout(timer);
+        this._port.off('data', onData);
+        const data = this._buffer;
+        this._buffer = Buffer.alloc(0);
+        resolve(data);
       };
-      poll();
+      this._port.once('data', onData);
     });
   }
 }
