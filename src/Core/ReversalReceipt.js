@@ -1,9 +1,9 @@
 import { Receipt } from './Receipt.js';
 
 export const ReversalReason = Object.freeze({
-  OperatorError: 1,
-  Refund: 2,
-  TaxBaseReduction: 3,
+  OperatorError: 'operator-error',
+  Refund: 'refund',
+  TaxBaseReduction: 'tax-base-reduction',
 });
 
 export class ReversalReceipt extends Receipt {

@@ -86,7 +86,11 @@ export class ServiceController {
   getTaskInfo(taskId) {
     const task = this._tasks[taskId];
     if (!task) return { taskStatus: TaskStatus.Unknown, result: null };
-    return { taskStatus: task.status, result: task.result };
+    const info = { taskStatus: task.status, result: task.result };
+    if (task.status === TaskStatus.Finished) {
+      delete this._tasks[taskId];
+    }
+    return info;
   }
 
   async runAsync(printJob) {

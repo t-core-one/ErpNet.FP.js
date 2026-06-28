@@ -7,11 +7,10 @@ export const ItemType = Object.freeze({
 });
 
 export const PriceModifierType = Object.freeze({
-  None: 0,
-  DiscountPercent: 1,
-  DiscountAmount: 2,
-  SurchargePercent: 3,
-  SurchargeAmount: 4,
+  DiscountPercent: 'discount-percent',
+  DiscountAmount: 'discount-amount',
+  SurchargePercent: 'surcharge-percent',
+  SurchargeAmount: 'surcharge-amount',
 });
 
 export const TaxGroup = Object.freeze({
@@ -37,6 +36,6 @@ export class Item {
     this.UnitPrice = 0;
     this.Amount = 0;
     this.PriceModifierValue = 0;
-    this.PriceModifierType = PriceModifierType.None;
+    this.PriceModifierType = null;
   }
 }

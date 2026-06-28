@@ -57,7 +57,6 @@ export class BgFiscalPrinter {
 
   getSupportedPaymentTypes() {
     return Object.keys(this.paymentTypeMappings)
-      .map(k => parseInt(k, 10))
       .filter(k => k !== PaymentType.Change);
   }
 
@@ -73,9 +72,7 @@ export class BgFiscalPrinter {
     if (!receipt.Items || receipt.Items.length === 0) {
       status.addError('E103', 'Receipt must have at least one item');
     }
-    if (!receipt.Payments || receipt.Payments.length === 0) {
-      status.addError('E104', 'Receipt must have at least one payment');
-    }
+    // Per protocol: missing payments section → print full amount as cash (no error)
     return status;
   }
 

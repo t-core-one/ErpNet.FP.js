@@ -262,9 +262,10 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
 
   getReversalReasonText(reason) {
     switch (reason) {
-      case 1 /* OperatorError */: return '1';
-      case 2 /* Refund */: return '0';
-      case 3 /* TaxBaseReduction */: return '2';
+      case ReversalReason.OperatorError: return '1';
+      case ReversalReason.Refund: return '0';
+      case ReversalReason.TaxBaseReduction: return '2';
+      case 'taxbase-reduction': return '2'; // backward compat
       default: return '1';
     }
   }
@@ -289,7 +290,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       ? `${text}\t${taxText}${price}`
       : `${text}\t${dept}\t${price}`;
     if (qty !== 0) str += `*${qty}`;
-    if (item.PriceModifierType !== PriceModifierType.None) {
+    if (item.PriceModifierType) {
       const val = item.PriceModifierValue || 0;
       switch (item.PriceModifierType) {
         case PriceModifierType.DiscountPercent:  str += `,${(-val).toFixed(2)}`; break;
@@ -300,6 +301,16 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     }
     logger.debug(`_addSale: cmd="${str}" (UnitPrice=${item.UnitPrice}, TaxGroup=${item.TaxGroup}, Qty=${item.Quantity})`);
     await this._sendCommand(CMD.FiscalReceiptSale, str);
+  }
+
+  async _addSubtotalChangeAmount(amount) {
+    // ISL format: "10;{amount:F2}" — negative = discount, positive = surcharge
+    await this._sendCommand(CMD.Subtotal, `10;${amount.toFixed(2)}`);
+  }
+
+  async _fullPayment() {
+    // Tab-only = full amount as cash, no change
+    await this._sendCommand(CMD.FiscalReceiptTotal, '\t');
   }
 
   async _addComment(text) {
@@ -358,6 +369,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   }
 
   async printReceipt(receipt) {
+    logger.debug(`printReceipt: Items=${JSON.stringify(receipt.Items)?.slice(0,200)}, Payments=${JSON.stringify(receipt.Payments)?.slice(0,100)}`);
     const validation = this.validateReceipt(receipt);
     if (!validation.Ok) return validation;
 
@@ -367,12 +379,20 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       for (const item of receipt.Items) {
         if (item.Type === ItemType.Comment || item.Type === ItemType.FooterComment) {
           await this._addComment(item.Text);
+        } else if (item.Type === ItemType.DiscountAmount) {
+          await this._addSubtotalChangeAmount(-(item.Amount || 0));
+        } else if (item.Type === ItemType.SurchargeAmount) {
+          await this._addSubtotalChangeAmount(item.Amount || 0);
         } else {
           await this._addSale(item);
         }
       }
-      for (const payment of receipt.Payments) {
-        await this._addPayment(payment);
+      if (!receipt.Payments || receipt.Payments.length === 0) {
+        await this._fullPayment();
+      } else {
+        for (const payment of receipt.Payments) {
+          await this._addPayment(payment);
+        }
       }
       await this._closeReceipt();
       const info = await this._getLastReceiptInfo();
@@ -394,12 +414,20 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       for (const item of (reversalReceipt.Items || [])) {
         if (item.Type === ItemType.Comment || item.Type === ItemType.FooterComment) {
           await this._addComment(item.Text);
+        } else if (item.Type === ItemType.DiscountAmount) {
+          await this._addSubtotalChangeAmount(-(item.Amount || 0));
+        } else if (item.Type === ItemType.SurchargeAmount) {
+          await this._addSubtotalChangeAmount(item.Amount || 0);
         } else {
           await this._addSale(item);
         }
       }
-      for (const payment of (reversalReceipt.Payments || [])) {
-        await this._addPayment(payment);
+      if (!reversalReceipt.Payments || reversalReceipt.Payments.length === 0) {
+        await this._fullPayment();
+      } else {
+        for (const payment of reversalReceipt.Payments) {
+          await this._addPayment(payment);
+        }
       }
       await this._closeReceipt();
       const info = await this._getLastReceiptInfo();
