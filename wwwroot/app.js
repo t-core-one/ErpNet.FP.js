@@ -116,11 +116,11 @@ function showAvailablePrinters() {
                     '<label style="overflow:hidden;display:inline-block;text-overflow: ellipsis;white-space: nowrap;" for="available-section-' + printerId + '" aria-hidden="true"><strong>' + printerId + '</strong></label>' +
                     '<div><ul>' + characteristics + '</ul>' +
 
-                    '<button class="small primary" onclick="printZReport(\'' + printerId + '\')">Z-Report</button>' +
-                    '<button class="small primary" onclick="printXReport(\'' + printerId + '\')">X-Report</button>' +
-                    '<button class="small primary" onclick="resetPrinter(\'' + printerId + '\')">Reset</button>' +
-                    '<button class="small primary" title="Sync the printer time with the current time on the PC" onclick="syncTime(\'' + printerId + '\')">Sync Time</button>' +
-                    '<button class="small primary" title="Prints duplicate of the last fiscal receipt" onclick="printDuplicate(\'' + printerId + '\')">Duplicate</button>' +
+                    '<button id="btn-' + printerId + '-zrep" class="small primary printer-btn" data-printer="' + printerId + '" onclick="printZReport(\'' + printerId + '\')">Z-Report</button>' +
+                    '<button id="btn-' + printerId + '-xrep" class="small primary printer-btn" data-printer="' + printerId + '" onclick="printXReport(\'' + printerId + '\')">X-Report</button>' +
+                    '<button id="btn-' + printerId + '-reset" class="small primary printer-btn" data-printer="' + printerId + '" onclick="resetPrinter(\'' + printerId + '\')">Reset</button>' +
+                    '<button id="btn-' + printerId + '-sync" class="small primary printer-btn" data-printer="' + printerId + '" title="Sync the printer time with the current time on the PC" onclick="syncTime(\'' + printerId + '\')">Sync Time</button>' +
+                    '<button id="btn-' + printerId + '-dupl" class="small primary printer-btn" data-printer="' + printerId + '" title="Prints duplicate of the last fiscal receipt" onclick="printDuplicate(\'' + printerId + '\')">Duplicate</button>' +
                     '<br /><h4>Advanced properties for printer with serial number ' + printer.serialNumber + '... &#8964;</h4>' +
                     '<div class="card fluid">' +
                     printerConstantsContent +
@@ -520,7 +520,17 @@ function printDuplicate(printerId) {
     })
 }
 
+function setPrinterBusy(printerId, busy, busyLabel) {
+    $('[data-printer="' + printerId + '"].printer-btn').prop('disabled', busy);
+    if (busy) {
+        $('#btn-' + printerId + '-zrep').html('<div class="spinner primary"></div>' + (busyLabel || 'Processing...'));
+    } else {
+        $('#btn-' + printerId + '-zrep').text('Z-Report');
+    }
+}
+
 function printZReport(printerId) {
+    setPrinterBusy(printerId, true, 'Printing Z-Report...');
     $.ajax({
         type: 'POST',
         url: '/printers/' + printerId + '/zreport',
@@ -529,6 +539,7 @@ function printZReport(printerId) {
         dataType: 'json',
         timeout: 0,
         success: function (data) {
+            setPrinterBusy(printerId, false);
             if (data.ok) {
                 showToastMessage("The Z-Report printing is done.")
             } else {
@@ -543,6 +554,7 @@ function printZReport(printerId) {
             }
         },
         error: function (xhr, type) {
+            setPrinterBusy(printerId, false);
             showToastMessage("Cannot print the Z-Report.")
         }
     })
