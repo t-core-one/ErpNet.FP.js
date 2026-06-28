@@ -8,6 +8,7 @@ export const PrintJobAction = Object.freeze({
   Deposit: 'Deposit',
   XReport: 'XReport',
   ZReport: 'ZReport',
+  MReport: 'MReport',
   SetDateTime: 'SetDateTime',
   Duplicate: 'Duplicate',
   Reset: 'Reset',
@@ -38,6 +39,7 @@ export class PrintJob {
       case PrintJobAction.Deposit:         return p.printMoneyDeposit(doc);
       case PrintJobAction.XReport:         return p.printXReport(doc);
       case PrintJobAction.ZReport:         return p.printZReport(doc);
+      case PrintJobAction.MReport:         return p.printMonthlyReport(doc);
       case PrintJobAction.SetDateTime:     return p.setDateTime(doc);
       case PrintJobAction.Duplicate:       return p.printDuplicate(doc);
       case PrintJobAction.Reset:           return p.reset(doc);

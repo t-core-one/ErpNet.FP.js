@@ -31,6 +31,8 @@ const CMD = {
   FiscalReceiptComment:       0x36,
   FiscalReceiptSale:          0x31,
   PrintDailyReport:           0x45,
+  FiscalMemoryShortReport:    0x4F,
+  FiscalMemoryFullReport:     0x5E,
   GetDateTime:                0x3E,
   SetDateTime:                0x3D,
   GetReceiptStatus:           0x4C,
@@ -442,6 +444,29 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       await this._sendCommand(CMD.PrintDailyReport, '2');
     } catch (e) {
       status.addError('E401', e.message);
+    }
+    return status;
+  }
+
+  async printMonthlyReport(dateRange) {
+    const status = new DeviceStatusWithReceiptInfo();
+    try {
+      const pad2 = n => String(n).padStart(2, '0');
+      // Protocol date format: DDMMYY (no separators)
+      const toDeviceDate = iso => {
+        const d = new Date(iso);
+        return `${pad2(d.getDate())}${pad2(d.getMonth() + 1)}${String(d.getFullYear()).slice(-2)}`;
+      };
+      const start = dateRange && dateRange.StartDate ? toDeviceDate(dateRange.StartDate) : '';
+      const end   = dateRange && dateRange.EndDate   ? toDeviceDate(dateRange.EndDate)   : '';
+      const data = end ? `${start},${end}` : start;
+      // 0x4F = short report, 0x5E = full/detailed report
+      const cmd = (dateRange && dateRange.Detailed)
+        ? CMD.FiscalMemoryFullReport
+        : CMD.FiscalMemoryShortReport;
+      await this._sendCommand(cmd, data, 1, 90000);
+    } catch (e) {
+      status.addError('E402', e.message);
     }
     return status;
   }

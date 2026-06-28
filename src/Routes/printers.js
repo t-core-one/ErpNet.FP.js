@@ -213,6 +213,25 @@ router.post('/:id/xreport', async (req, res) => {
   }
 });
 
+// POST /printers/:id/mreport
+router.post('/:id/mreport', async (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const printer = service.printers[req.params.id];
+  if (!printer) return res.status(404).json({ error: 'Printer not found' });
+  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
+  try {
+    const result = await service.runAsync(new PrintJob({
+      printer, action: PrintJobAction.MReport, document: req.body,
+      asyncTimeout, timeout, taskId: req.query.taskId,
+    }));
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /printers/:id/duplicate
 router.post('/:id/duplicate', async (req, res) => {
   const service = getService(req);

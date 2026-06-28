@@ -121,6 +121,13 @@ function showAvailablePrinters() {
                     '<button id="btn-' + printerId + '-reset" class="small primary printer-btn" data-printer="' + printerId + '" onclick="resetPrinter(\'' + printerId + '\')">Reset</button>' +
                     '<button id="btn-' + printerId + '-sync" class="small primary printer-btn" data-printer="' + printerId + '" title="Sync the printer time with the current time on the PC" onclick="syncTime(\'' + printerId + '\')">Sync Time</button>' +
                     '<button id="btn-' + printerId + '-dupl" class="small primary printer-btn" data-printer="' + printerId + '" title="Prints duplicate of the last fiscal receipt" onclick="printDuplicate(\'' + printerId + '\')">Duplicate</button>' +
+                    '<br />' +
+                    '<label style="font-size:0.85em;margin-right:0.3em;">From:</label>' +
+                    '<input type="date" id="mreport-start-' + printerId + '" style="height:1.8em;padding:0.1em 0.3em;font-size:0.85em;" />' +
+                    '&nbsp;<label style="font-size:0.85em;margin-right:0.3em;">To:</label>' +
+                    '<input type="date" id="mreport-end-' + printerId + '" style="height:1.8em;padding:0.1em 0.3em;font-size:0.85em;" />' +
+                    '&nbsp;<button id="btn-' + printerId + '-mrep" class="small primary printer-btn" data-printer="' + printerId + '" title="Prints periodical fiscal memory report for the selected date range" onclick="printMonthlyReport(\'' + printerId + '\')">M-Report</button>' +
+                    '&nbsp;<label style="font-size:0.85em;"><input type="checkbox" id="mreport-detailed-' + printerId + '" />&nbsp;Detailed</label>' +
                     '<br /><h4>Advanced properties for printer with serial number ' + printer.serialNumber + '... &#8964;</h4>' +
                     '<div class="card fluid">' +
                     printerConstantsContent +
@@ -520,17 +527,18 @@ function printDuplicate(printerId) {
     })
 }
 
-function setPrinterBusy(printerId, busy, busyLabel) {
+function setPrinterBusy(printerId, busy, busyBtnId, busyLabel, idleLabel) {
     $('[data-printer="' + printerId + '"].printer-btn').prop('disabled', busy);
+    var btnId = '#btn-' + printerId + '-' + (busyBtnId || 'zrep');
     if (busy) {
-        $('#btn-' + printerId + '-zrep').html('<div class="spinner primary"></div>' + (busyLabel || 'Processing...'));
+        $(btnId).html('<div class="spinner primary"></div>' + (busyLabel || 'Processing...'));
     } else {
-        $('#btn-' + printerId + '-zrep').text('Z-Report');
+        $(btnId).text(idleLabel || 'Z-Report');
     }
 }
 
 function printZReport(printerId) {
-    setPrinterBusy(printerId, true, 'Printing Z-Report...');
+    setPrinterBusy(printerId, true, 'zrep', 'Printing Z-Report...', 'Z-Report');
     $.ajax({
         type: 'POST',
         url: '/printers/' + printerId + '/zreport',
@@ -539,7 +547,7 @@ function printZReport(printerId) {
         dataType: 'json',
         timeout: 0,
         success: function (data) {
-            setPrinterBusy(printerId, false);
+            setPrinterBusy(printerId, false, 'zrep', null, 'Z-Report');
             if (data.ok) {
                 showToastMessage("The Z-Report printing is done.")
             } else {
@@ -554,7 +562,7 @@ function printZReport(printerId) {
             }
         },
         error: function (xhr, type) {
-            setPrinterBusy(printerId, false);
+            setPrinterBusy(printerId, false, 'zrep', null, 'Z-Report');
             showToastMessage("Cannot print the Z-Report.")
         }
     })
@@ -584,6 +592,43 @@ function printXReport(printerId) {
         },
         error: function (xhr, type) {
             showToastMessage("Cannot print the X-Report.")
+        }
+    })
+}
+
+function printMonthlyReport(printerId) {
+    var startDate = $('#mreport-start-' + printerId).val();
+    var endDate = $('#mreport-end-' + printerId).val();
+    if (!startDate || !endDate) {
+        showToastMessage("Please select a start date and an end date for the M-Report.");
+        return;
+    }
+    setPrinterBusy(printerId, true, 'mrep', 'Printing M-Report...', 'M-Report');
+    $.ajax({
+        type: 'POST',
+        url: '/printers/' + printerId + '/mreport',
+        data: JSON.stringify({ StartDate: startDate, EndDate: endDate, Detailed: $('#mreport-detailed-' + printerId).prop('checked') }),
+        contentType: 'application/json',
+        dataType: 'json',
+        timeout: 0,
+        success: function (data) {
+            setPrinterBusy(printerId, false, 'mrep', null, 'M-Report');
+            if (data.ok) {
+                showToastMessage("The M-Report printing is done.")
+            } else {
+                var errors = "";
+                for (var ix in data.messages) {
+                    var message = data.messages[ix]
+                    if (message.type == "error") {
+                        errors += message.text + "; "
+                    }
+                }
+                showToastMessage("Cannot print the M-Report: " + errors.trim())
+            }
+        },
+        error: function (xhr, type) {
+            setPrinterBusy(printerId, false, 'mrep', null, 'M-Report');
+            showToastMessage("Cannot print the M-Report.")
         }
     })
 }
