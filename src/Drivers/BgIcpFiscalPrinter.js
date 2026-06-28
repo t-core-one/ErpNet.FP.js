@@ -8,6 +8,7 @@ import {
 } from '../Core/DeviceStatus.js';
 import { ItemType, PriceModifierType, TaxGroup } from '../Core/Item.js';
 import { PaymentType } from '../Core/Payment.js';
+import { ReversalReason } from '../Core/ReversalReceipt.js';
 import { withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
 import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
 
@@ -248,9 +249,10 @@ export class BgIcpFiscalPrinter extends BgFiscalPrinter {
 
   _getIcpReversalReason(reason) {
     switch (reason) {
-      case 1: return 'R'; // OperatorError
-      case 2: return 'S'; // Refund
-      case 3: return 'V'; // TaxBaseReduction
+      case ReversalReason.OperatorError: return 'R';
+      case ReversalReason.Refund: return 'S';
+      case ReversalReason.TaxBaseReduction: return 'V';
+      case 'taxbase-reduction': return 'V';
       default: return 'R';
     }
   }
@@ -274,7 +276,7 @@ export class BgIcpFiscalPrinter extends BgFiscalPrinter {
 
     await this._request(cmd, str);
 
-    if (item.PriceModifierType !== PriceModifierType.None) {
+    if (item.PriceModifierType) {
       await this._applyPriceModifier(item);
     }
   }

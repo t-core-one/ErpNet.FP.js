@@ -58,7 +58,7 @@ export class BgDaisyIslFiscalPrinter extends BgIslFiscalPrinter {
       await this._sendCommand(CMD.FiscalReceiptSale, str);
     }
 
-    if (item.PriceModifierType !== PriceModifierType.None) {
+    if (item.PriceModifierType) {
       await this._applyPriceModifier(item);
     }
   }

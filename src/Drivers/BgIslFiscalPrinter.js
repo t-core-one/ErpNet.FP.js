@@ -67,14 +67,14 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
 
   getTaxGroupText(taxGroup) {
     const map = {
-      [TaxGroup.TaxGroup1]: '\xc0', // А in cp1251
-      [TaxGroup.TaxGroup2]: '\xc1', // Б
-      [TaxGroup.TaxGroup3]: '\xc2', // В
-      [TaxGroup.TaxGroup4]: '\xc3', // Г
-      [TaxGroup.TaxGroup5]: '\xc4', // Д
-      [TaxGroup.TaxGroup6]: '\xc5', // Е
-      [TaxGroup.TaxGroup7]: '\xc6', // Ж
-      [TaxGroup.TaxGroup8]: '\xc7', // З
+      [TaxGroup.TaxGroup1]: 'А', // U+0410 → cp1251 0xC0
+      [TaxGroup.TaxGroup2]: 'Б', // U+0411 → cp1251 0xC1
+      [TaxGroup.TaxGroup3]: 'В', // U+0412 → cp1251 0xC2
+      [TaxGroup.TaxGroup4]: 'Г', // U+0413 → cp1251 0xC3
+      [TaxGroup.TaxGroup5]: 'Д', // U+0414 → cp1251 0xC4
+      [TaxGroup.TaxGroup6]: 'Е', // U+0415 → cp1251 0xC5
+      [TaxGroup.TaxGroup7]: 'Ж', // U+0416 → cp1251 0xC6
+      [TaxGroup.TaxGroup8]: 'З', // U+0417 → cp1251 0xC7
     };
     return map[taxGroup] || map[TaxGroup.TaxGroup1];
   }

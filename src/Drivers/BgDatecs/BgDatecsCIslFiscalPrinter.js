@@ -4,6 +4,7 @@ import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
 import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
 import { PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
+import { ReversalReason } from '../../Core/ReversalReceipt.js';
 import { withMaxLength } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
@@ -43,9 +44,10 @@ export class BgDatecsCIslFiscalPrinter extends BgIslFiscalPrinter {
 
   getReversalReasonText(reason) {
     switch (reason) {
-      case 1 /* OperatorError */: return '0';
-      case 2 /* Refund */: return '1';
-      case 3 /* TaxBaseReduction */: return '2';
+      case ReversalReason.OperatorError: return '0';
+      case ReversalReason.Refund: return '1';
+      case ReversalReason.TaxBaseReduction: return '2';
+      case 'taxbase-reduction': return '2';
       default: return '0';
     }
   }
@@ -62,7 +64,7 @@ export class BgDatecsCIslFiscalPrinter extends BgIslFiscalPrinter {
       ? `${text}\t${taxText}${price}`
       : `${text}\t${dept}\t${price}`;
     if (qty !== 0) str += `*${qty}`;
-    if (item.PriceModifierType !== PriceModifierType.None) {
+    if (item.PriceModifierType) {
       const val = item.PriceModifierValue || 0;
       switch (item.PriceModifierType) {
         case PriceModifierType.DiscountPercent:  str += `,${(-val).toFixed(2)}`; break;

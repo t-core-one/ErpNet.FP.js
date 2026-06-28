@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BgDatecsPIslFiscalPrinter } from '../../src/Drivers/BgDatecs/BgDatecsPIslFiscalPrinter.js';
 import { PriceModifierType, TaxGroup } from '../../src/Core/Item.js';
 import { PaymentType } from '../../src/Core/Payment.js';
+import { ReversalReason } from '../../src/Core/ReversalReceipt.js';
 
 // CMD constants (from BgIslFiscalPrinter)
 const CMD_FISCAL_RECEIPT_SALE  = 0x31;
@@ -48,10 +49,10 @@ describe('BgDatecsPIslFiscalPrinter', () => {
   // ── Reversal reason ───────────────────────────────────────────────────────
 
   describe('getReversalReasonText', () => {
-    it('maps OperatorError (1) to E', () => expect(printer.getReversalReasonText(1)).toBe('E'));
-    it('maps Refund (2) to R',         () => expect(printer.getReversalReasonText(2)).toBe('R'));
-    it('maps TaxBaseReduction (3) to T',() => expect(printer.getReversalReasonText(3)).toBe('T'));
-    it('defaults to E for unknown',    () => expect(printer.getReversalReasonText(99)).toBe('E'));
+    it('maps OperatorError to E', () => expect(printer.getReversalReasonText(ReversalReason.OperatorError)).toBe('E'));
+    it('maps Refund to R',         () => expect(printer.getReversalReasonText(ReversalReason.Refund)).toBe('R'));
+    it('maps TaxBaseReduction to T',() => expect(printer.getReversalReasonText(ReversalReason.TaxBaseReduction)).toBe('T'));
+    it('defaults to E for unknown',    () => expect(printer.getReversalReasonText('unknown')).toBe('E'));
   });
 
   // ── Payment types ─────────────────────────────────────────────────────────
@@ -217,7 +218,7 @@ describe('BgDatecsPIslFiscalPrinter', () => {
         Operator: '1', OperatorPassword: '0000',
         ReceiptNumber: '0100',
         FiscalMemorySerialNumber: 'FM12345678',
-        Reason: 2, // Refund → 'R'
+        Reason: ReversalReason.Refund, // → 'R'
         ReceiptDateTime: new Date(2024, 0, 15, 10, 30, 0),
       });
       const header = printer._sendCommand.mock.calls[0][1];

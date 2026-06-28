@@ -10,6 +10,7 @@ import {
 } from '../../Core/DeviceStatus.js';
 import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
+import { ReversalReason } from '../../Core/ReversalReceipt.js';
 import { withMaxLength, wrapAtLength } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
@@ -50,9 +51,10 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
 
   getReversalReasonText(reason) {
     switch (reason) {
-      case 1 /* OperatorError */: return '0';
-      case 2 /* Refund */: return '1';
-      case 3 /* TaxBaseReduction */: return '2';
+      case ReversalReason.OperatorError: return '0';
+      case ReversalReason.Refund: return '1';
+      case ReversalReason.TaxBaseReduction: return '2';
+      case 'taxbase-reduction': return '2';
       default: return '0';
     }
   }
@@ -83,7 +85,7 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     const dept = item.Department || 0;
     const qty = item.Quantity || 0;
     const modType = this._priceModifierTypeCode(item.PriceModifierType);
-    const modVal = item.PriceModifierType !== PriceModifierType.None
+    const modVal = item.PriceModifierType
       ? (item.PriceModifierValue || 0).toFixed(2) : '0.00';
     // Protocol: {text}\t{taxCd}\t{price}\t{qty}\t{modType}\t{modValue}\t{dept}\t
     const str = [text, taxText, price,

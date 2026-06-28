@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BgDatecsCIslFiscalPrinter } from '../../src/Drivers/BgDatecs/BgDatecsCIslFiscalPrinter.js';
 import { PriceModifierType, TaxGroup } from '../../src/Core/Item.js';
 import { PaymentType } from '../../src/Core/Payment.js';
+import { ReversalReason } from '../../src/Core/ReversalReceipt.js';
 
 const CMD_FISCAL_RECEIPT_SALE  = 0x31;
 const CMD_FISCAL_RECEIPT_TOTAL = 0x35;
@@ -40,9 +41,9 @@ describe('BgDatecsCIslFiscalPrinter', () => {
   // ── Reversal reason ───────────────────────────────────────────────────────
 
   describe('getReversalReasonText', () => {
-    it('maps OperatorError (1) to 0', () => expect(printer.getReversalReasonText(1)).toBe('0'));
-    it('maps Refund (2) to 1',        () => expect(printer.getReversalReasonText(2)).toBe('1'));
-    it('maps TaxBaseReduction (3) to 2',() => expect(printer.getReversalReasonText(3)).toBe('2'));
+    it('maps OperatorError to 0', () => expect(printer.getReversalReasonText(ReversalReason.OperatorError)).toBe('0'));
+    it('maps Refund to 1',        () => expect(printer.getReversalReasonText(ReversalReason.Refund)).toBe('1'));
+    it('maps TaxBaseReduction to 2',() => expect(printer.getReversalReasonText(ReversalReason.TaxBaseReduction)).toBe('2'));
   });
 
   // ── Payment types ─────────────────────────────────────────────────────────

@@ -265,7 +265,7 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
       await this._sendCommand(CMD.SellCorrection, fb.build());
     }
 
-    if (item.PriceModifierType !== PriceModifierType.None) {
+    if (item.PriceModifierType) {
       await this._applyPriceModifier(item);
     }
   }

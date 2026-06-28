@@ -9,6 +9,7 @@ import {
 } from '../../Core/DeviceStatus.js';
 import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
+import { ReversalReason } from '../../Core/ReversalReceipt.js';
 import { withMaxLength, wrapAtLength } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIX = 'ED';
@@ -63,11 +64,11 @@ export class BgEltradeIslFiscalPrinter extends BgIslFiscalPrinter {
   }
 
   getEltradeReversalReason(reason) {
-    // Eltrade reversal reasons differ
     switch (reason) {
-      case 1: return '1'; // OperatorError
-      case 2: return '0'; // Refund
-      case 3: return '2'; // TaxBaseReduction
+      case ReversalReason.OperatorError: return '1';
+      case ReversalReason.Refund: return '0';
+      case ReversalReason.TaxBaseReduction: return '2';
+      case 'taxbase-reduction': return '2';
       default: return '1';
     }
   }
