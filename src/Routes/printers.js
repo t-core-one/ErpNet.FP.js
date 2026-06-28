@@ -1,8 +1,23 @@
 import express from 'express';
 import { PrintJob, PrintJobAction, DEFAULT_TIMEOUT } from '../Service/PrintJob.js';
 import { parseTimeout } from '../Helpers/Helpers.js';
+import { toPascalCase } from '../Helpers/camelCase.js';
 
 const router = express.Router();
+
+// Printer routes query live hardware — never serve stale cached responses.
+router.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
+// Normalize incoming JSON bodies to PascalCase so drivers always receive
+// PascalCase keys regardless of what the client sends (camelCase or PascalCase).
+// This mirrors ASP.NET Core's default case-insensitive JSON binding in the C# server.
+router.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') req.body = toPascalCase(req.body);
+  next();
+});
 
 function getService(req) {
   return req.app.locals.service;
@@ -48,7 +63,7 @@ router.get('/:id/cash', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -67,7 +82,7 @@ router.post('/:id/rawrequest', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -86,7 +101,7 @@ router.post('/:id/receipt', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -105,7 +120,7 @@ router.post('/:id/reversalreceipt', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -124,7 +139,7 @@ router.post('/:id/withdraw', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -143,7 +158,7 @@ router.post('/:id/deposit', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -162,7 +177,7 @@ router.post('/:id/datetime', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -181,7 +196,7 @@ router.post('/:id/zreport', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -200,7 +215,7 @@ router.post('/:id/xreport', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -219,7 +234,7 @@ router.post('/:id/mreport', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -238,7 +253,7 @@ router.post('/:id/duplicate', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({
@@ -257,7 +272,7 @@ router.post('/:id/reset', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
-  const asyncTimeout = parseInt(req.query.asyncTimeout, 10) || DEFAULT_TIMEOUT;
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {
     const result = await service.runAsync(new PrintJob({

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toCamelCase } from '../../src/Helpers/camelCase.js';
+import { toCamelCase, toPascalCase } from '../../src/Helpers/camelCase.js';
 
 describe('toCamelCase', () => {
   it('lowercases first char of PascalCase keys', () => {
@@ -45,6 +45,60 @@ describe('toCamelCase', () => {
     expect(toCamelCase(42)).toBe(42);
     expect(toCamelCase('hello')).toBe('hello');
     expect(toCamelCase(true)).toBe(true);
+  });
+});
+
+describe('toPascalCase', () => {
+  it('uppercases first char of camelCase keys', () => {
+    expect(toPascalCase({ amount: 100, operator: 'op' }))
+      .toEqual({ Amount: 100, Operator: 'op' });
+  });
+
+  it('converts Odoo deposit payload', () => {
+    expect(toPascalCase({ amount: 50, operatorPassword: 'pass' }))
+      .toEqual({ Amount: 50, OperatorPassword: 'pass' });
+  });
+
+  it('converts Odoo receipt payload with nested arrays', () => {
+    const input = {
+      uniqueSaleNumber: 'USN',
+      items: [{ text: 'Beer', unitPrice: 1.5, taxGroup: 2, quantity: 1 }],
+      payments: [{ amount: 1.5 }],
+    };
+    expect(toPascalCase(input)).toEqual({
+      UniqueSaleNumber: 'USN',
+      Items: [{ Text: 'Beer', UnitPrice: 1.5, TaxGroup: 2, Quantity: 1 }],
+      Payments: [{ Amount: 1.5 }],
+    });
+  });
+
+  it('leaves already-PascalCase keys unchanged', () => {
+    expect(toPascalCase({ Amount: 100, Ok: true }))
+      .toEqual({ Amount: 100, Ok: true });
+  });
+
+  it('preserves serial-number keys whose second char is uppercase', () => {
+    expect(toPascalCase({ DT970048: { model: 'FP-700' } }))
+      .toEqual({ DT970048: { Model: 'FP-700' } });
+  });
+
+  it('is the inverse of toCamelCase for normal camelCase objects', () => {
+    const camel = { amount: 100, operator: 'op', items: [{ text: 'Beer', unitPrice: 1.5 }] };
+    expect(toPascalCase(camel)).toEqual({ Amount: 100, Operator: 'op', Items: [{ Text: 'Beer', UnitPrice: 1.5 }] });
+  });
+
+  it('returns null unchanged', () => {
+    expect(toPascalCase(null)).toBeNull();
+  });
+
+  it('returns primitives unchanged', () => {
+    expect(toPascalCase(42)).toBe(42);
+    expect(toPascalCase('hello')).toBe('hello');
+  });
+
+  it('is the inverse of toPascalCase for normal PascalCase objects', () => {
+    const pascal = { Amount: 100, Operator: 'op', Items: [{ Text: 'Beer', UnitPrice: 1.5 }] };
+    expect(toCamelCase(pascal)).toEqual({ amount: 100, operator: 'op', items: [{ text: 'Beer', unitPrice: 1.5 }] });
   });
 
   it('converts multi-level PascalCase object', () => {

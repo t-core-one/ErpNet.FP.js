@@ -50,6 +50,12 @@ async function main() {
 
   const app = express();
 
+  // Disable ETag generation for all API responses.
+  // express.static has its own etag option and is unaffected.
+  // This prevents 304 responses for live hardware endpoints even when
+  // the browser sends a cached If-None-Match header.
+  app.set('etag', false);
+
   app.use(express.json({ limit: '500kb' }));
   app.use(express.urlencoded({ extended: false, limit: '500kb' }));
 

@@ -1,4 +1,5 @@
 import iconv from 'iconv-lite';
+import logger from '../logger.js';
 import { BgFiscalPrinter } from './BgFiscalPrinter.js';
 import {
   DeviceStatusWithDateTime,
@@ -212,12 +213,23 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   async cash() {
     const status = new DeviceStatusWithCashAmount();
     try {
-      const resp = await this._sendCommand(CMD.GetReceiptStatus, 'T');
+      // Send MoneyTransfer with amount "0" — the printer responds with current cash totals.
+      const resp = await this._sendCommand(CMD.MoneyTransfer, '0');
       const str = iconv.decode(resp, 'cp1251');
-      // Response: open,total,receiptNum,... or similar; varies by device
+      logger.debug(`cash() raw response: "${str}"`);
       const parts = str.split(',');
-      // Cash amount usually in the total accumulated field
-      status.Amount = parseFloat(parts[1] || '0') || 0;
+      if (parts.length < 4) {
+        status.addError('E409', `Invalid cash response format: "${str}"`);
+      } else if (parts[0] === 'F') {
+        status.addError('E409', 'Cash query denied by printer (F). Receipt may be open.');
+      } else {
+        const amountStr = parts[1];
+        // Amount may be in cents (no decimal point) or already decimal
+        status.Amount = amountStr.includes('.')
+          ? parseFloat(amountStr)
+          : parseInt(amountStr, 10) / 100;
+        logger.debug(`cash() parsed: raw="${amountStr}" amount=${status.Amount}`);
+      }
     } catch (e) {
       status.addError('E003', e.message);
     }
@@ -286,6 +298,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
         case PriceModifierType.SurchargeAmount:  str += `$${val.toFixed(2)}`; break;
       }
     }
+    logger.debug(`_addSale: cmd="${str}" (UnitPrice=${item.UnitPrice}, TaxGroup=${item.TaxGroup}, Qty=${item.Quantity})`);
     await this._sendCommand(CMD.FiscalReceiptSale, str);
   }
 
@@ -404,8 +417,16 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     const status = new DeviceStatusWithCashAmount();
     try {
       const amount = transferAmount.Amount.toFixed(2);
-      await this._sendCommand(CMD.MoneyTransfer, amount);
-      status.Amount = transferAmount.Amount;
+      logger.debug(`printMoneyDeposit: sending amount="${amount}"`);
+      const resp = await this._sendCommand(CMD.MoneyTransfer, amount);
+      const str = iconv.decode(resp, 'cp1251');
+      logger.debug(`printMoneyDeposit: raw response="${str}"`);
+      const parts = str.split(',');
+      if (parts[0] === 'F') {
+        status.addError('E300', `Deposit denied by printer (F): ${str}`);
+      } else {
+        status.Amount = transferAmount.Amount;
+      }
     } catch (e) {
       status.addError('E300', e.message);
     }
@@ -418,8 +439,16 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     const status = new DeviceStatusWithCashAmount();
     try {
       const amount = (-transferAmount.Amount).toFixed(2);
-      await this._sendCommand(CMD.MoneyTransfer, amount);
-      status.Amount = transferAmount.Amount;
+      logger.debug(`printMoneyWithdraw: sending amount="${amount}"`);
+      const resp = await this._sendCommand(CMD.MoneyTransfer, amount);
+      const str = iconv.decode(resp, 'cp1251');
+      logger.debug(`printMoneyWithdraw: raw response="${str}"`);
+      const parts = str.split(',');
+      if (parts[0] === 'F') {
+        status.addError('E301', `Withdrawal denied by printer (F) — insufficient cash: ${str}`);
+      } else {
+        status.Amount = transferAmount.Amount;
+      }
     } catch (e) {
       status.addError('E300', e.message);
     }

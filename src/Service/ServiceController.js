@@ -90,7 +90,7 @@ export class ServiceController {
   }
 
   async runAsync(printJob) {
-    const asyncTimeout = printJob.asyncTimeout || DEFAULT_TIMEOUT;
+    const asyncTimeout = typeof printJob.asyncTimeout === 'number' ? printJob.asyncTimeout : DEFAULT_TIMEOUT;
 
     if (printJob.taskId) {
       const existing = this._tasks[printJob.taskId];
