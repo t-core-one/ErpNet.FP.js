@@ -37,24 +37,7 @@ function loadServerConfig() {
   }
 }
 
-function toCamelCase(obj) {
-  if (Array.isArray(obj)) return obj.map(toCamelCase);
-  if (obj !== null && typeof obj === 'object' && !(obj instanceof Date)) {
-    const out = {};
-    for (const [k, v] of Object.entries(obj)) {
-      // Only lowercase the first char when key looks like PascalCase:
-      // first char uppercase AND second char lowercase (so "Ok"→"ok", "SerialNumber"→"serialNumber"
-      // but "DT970048" or "URI" are left unchanged).
-      const isPascalCase = k.length > 1
-        && k.charCodeAt(0) >= 65 && k.charCodeAt(0) <= 90
-        && k.charCodeAt(1) >= 97 && k.charCodeAt(1) <= 122;
-      const key = isPascalCase ? k[0].toLowerCase() + k.slice(1) : k;
-      out[key] = toCamelCase(v);
-    }
-    return out;
-  }
-  return obj;
-}
+import { toCamelCase } from './Helpers/camelCase.js';
 
 async function main() {
   ensureAppSettings();
