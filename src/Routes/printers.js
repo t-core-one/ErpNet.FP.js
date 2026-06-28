@@ -122,6 +122,7 @@ router.post('/:id/reversalreceipt', async (req, res) => {
   if (!service.isReady) return notReady(res);
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
+  logger.debug(`reversalreceipt body: ${JSON.stringify(req.body)?.slice(0, 600)}`);
   const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
   const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
   try {

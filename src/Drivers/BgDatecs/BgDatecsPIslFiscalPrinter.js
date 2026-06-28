@@ -1,6 +1,7 @@
 import iconv from 'iconv-lite';
 import { BgIslFiscalPrinter, CMD } from '../BgIslFiscalPrinter.js';
 import { DeviceInfo } from '../../Core/DeviceInfo.js';
+import { DeviceStatusWithCashAmount } from '../../Core/DeviceStatus.js';
 import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
 import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
 import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
@@ -83,6 +84,15 @@ export class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
     await this._sendCommand(CMD.FiscalReceiptSale, str);
   }
 
+  // MoneyTransfer "0" causes the FP-700 (P model) to print a Cash-In receipt even for
+  // zero amount.  Skip the printer query and return a large sentinel so the Odoo
+  // pre-refund cash check always passes; the printer enforces the real cash limit.
+  async cash() {
+    const status = new DeviceStatusWithCashAmount();
+    status.Amount = 9999999;
+    return status;
+  }
+
   // Protocol: {OpNum},{Password},1,{ReasonCode}{OrigDocNum},{UniqueSaleNumber},{ddMMyyHHmmss},{FMSerial}
   async _openReversalReceipt(reversalReceipt) {
     const op = reversalReceipt.Operator || '1';
@@ -91,7 +101,8 @@ export class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
     const receiptNum = reversalReceipt.ReceiptNumber || '';
     const fmSerial = reversalReceipt.FiscalMemorySerialNumber || '';
     const reason = this.getReversalReasonText(reversalReceipt.Reason);
-    const dt = reversalReceipt.ReceiptDateTime || new Date();
+    const rawDt = reversalReceipt.ReceiptDateTime;
+    const dt = rawDt ? (rawDt instanceof Date ? rawDt : new Date(rawDt)) : new Date();
     const pad2 = n => String(n).padStart(2, '0');
     const yr2 = String(dt.getFullYear()).slice(-2);
     const dtStr = `${pad2(dt.getDate())}${pad2(dt.getMonth() + 1)}${yr2}${pad2(dt.getHours())}${pad2(dt.getMinutes())}${pad2(dt.getSeconds())}`;

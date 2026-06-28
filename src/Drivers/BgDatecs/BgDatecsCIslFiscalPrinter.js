@@ -84,7 +84,8 @@ export class BgDatecsCIslFiscalPrinter extends BgIslFiscalPrinter {
     const receiptNum = reversalReceipt.ReceiptNumber || '';
     const fmSerial = reversalReceipt.FiscalMemorySerialNumber || '';
     const reason = this.getReversalReasonText(reversalReceipt.Reason);
-    const dt = reversalReceipt.ReceiptDateTime || new Date();
+    const rawDt = reversalReceipt.ReceiptDateTime;
+    const dt = rawDt ? (rawDt instanceof Date ? rawDt : new Date(rawDt)) : new Date();
     const pad2 = n => String(n).padStart(2, '0');
     const yr2 = String(dt.getFullYear()).slice(-2);
     const dtStr = `${pad2(dt.getDate())}${pad2(dt.getMonth() + 1)}${yr2}${pad2(dt.getHours())}${pad2(dt.getMinutes())}${pad2(dt.getSeconds())}`;

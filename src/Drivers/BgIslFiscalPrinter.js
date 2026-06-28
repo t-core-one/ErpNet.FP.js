@@ -250,14 +250,16 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     const receiptNum = reversalReceipt.ReceiptNumber || '';
     const fmSerial = reversalReceipt.FiscalMemorySerialNumber || '';
     const reason = this.getReversalReasonText(reversalReceipt.Reason);
-    const dtStr = reversalReceipt.ReceiptDateTime
-      ? this._formatDateForReversal(reversalReceipt.ReceiptDateTime) : '';
+    const rawDt = reversalReceipt.ReceiptDateTime;
+    const dtObj = rawDt ? (rawDt instanceof Date ? rawDt : new Date(rawDt)) : null;
+    const dtStr = dtObj ? this._formatDateForReversal(dtObj) : '';
     return `${op},${pass},${usn}\t${reason},${receiptNum},${fmSerial},${dtStr}`;
   }
 
   _formatDateForReversal(dt) {
+    const d = (dt instanceof Date) ? dt : new Date(dt);
     const pad2 = n => String(n).padStart(2, '0');
-    return `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${dt.getFullYear()} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}`;
+    return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   }
 
   getReversalReasonText(reason) {
@@ -331,37 +333,42 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     await this._sendCommand(CMD.CloseFiscalReceipt, null);
   }
 
+  async _getReceiptAmount() {
+    // Command 0x4C "T" → "sign+amount_in_stotinki" or "amount.decimal" in field[2]
+    // Must be called BEFORE closing the receipt.
+    try {
+      const resp = await this._sendCommand(CMD.GetReceiptStatus, 'T');
+      const str = iconv.decode(resp || Buffer.alloc(0), 'cp1251').trim();
+      const fields = str.split(',');
+      if (fields.length >= 3) {
+        const raw = fields[2].trim();
+        if (raw.startsWith('+')) return parseFloat(raw.slice(1)) / 100;
+        if (raw.startsWith('-')) return -parseFloat(raw.slice(1)) / 100;
+        if (raw.includes('.')) return parseFloat(raw);
+        return parseFloat(raw) / 100;
+      }
+    } catch (_) {}
+    return 0;
+  }
+
   async _getLastReceiptInfo() {
     const status = new DeviceStatusWithReceiptInfo();
     try {
-      const resp = await this._sendCommand(CMD.ReadLastQRCode, null);
-      const qr = iconv.decode(resp || Buffer.alloc(0), 'cp1251').trim();
-      // Parse QR similar to ZFP: FM*Num*Date*Time*Amount
-      const parts = qr.split('*');
-      if (parts.length >= 4) {
-        status.FiscalMemorySerialNumber = parts[0];
-        status.ReceiptNumber = parts[1];
-        const dateStr = parts[2];
-        const timeStr = parts[3];
-        if (dateStr.length >= 6) {
-          const day = parseInt(dateStr.slice(0, 2), 10);
-          const mon = parseInt(dateStr.slice(2, 4), 10) - 1;
-          const yr = 2000 + parseInt(dateStr.slice(4, 6), 10);
-          let hh = 0, mm = 0, ss = 0;
-          if (timeStr.length >= 6) {
-            hh = parseInt(timeStr.slice(0, 2), 10);
-            mm = parseInt(timeStr.slice(2, 4), 10);
-            ss = parseInt(timeStr.slice(4, 6), 10);
-          }
-          status.ReceiptDateTime = new Date(yr, mon, day, hh, mm, ss);
-        }
-        if (parts.length >= 5) status.ReceiptAmount = parseFloat(parts[4]) || 0;
-      } else {
-        // Fallback: get last doc number
-        const numResp = await this._sendCommand(CMD.GetLastDocumentNumber, null);
-        const numStr = iconv.decode(numResp || Buffer.alloc(0), 'cp1251').trim();
-        status.ReceiptNumber = numStr;
+      // FM serial is already known from device detection
+      status.FiscalMemorySerialNumber = this.info.FiscalMemorySerialNumber || '';
+
+      // Get current printer date/time (format: "dd-MM-yy HH:mm:ss" or "dd.MM.yy HH:mm:ss")
+      const dtResp = await this._sendCommand(CMD.GetDateTime, null);
+      const dtStr = iconv.decode(dtResp || Buffer.alloc(0), 'cp1251').trim();
+      const m = dtStr.match(/(\d{2})[-.](\d{2})[-.](\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+      if (m) {
+        status.ReceiptDateTime = new Date(2000 + parseInt(m[3], 10), parseInt(m[2], 10) - 1,
+          parseInt(m[1], 10), parseInt(m[4], 10), parseInt(m[5], 10), parseInt(m[6], 10));
       }
+
+      // Get receipt number
+      const numResp = await this._sendCommand(CMD.GetLastDocumentNumber, null);
+      status.ReceiptNumber = iconv.decode(numResp || Buffer.alloc(0), 'cp1251').trim();
     } catch (e) {
       status.addError('E010', e.message);
     }
@@ -394,8 +401,10 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
           await this._addPayment(payment);
         }
       }
+      const receiptAmount = await this._getReceiptAmount();
       await this._closeReceipt();
       const info = await this._getLastReceiptInfo();
+      info.ReceiptAmount = receiptAmount;
       Object.assign(status, info);
     } catch (e) {
       status.addError('E100', e.message);
@@ -429,8 +438,10 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
           await this._addPayment(payment);
         }
       }
+      const receiptAmount = await this._getReceiptAmount();
       await this._closeReceipt();
       const info = await this._getLastReceiptInfo();
+      info.ReceiptAmount = receiptAmount;
       Object.assign(status, info);
     } catch (e) {
       status.addError('E200', e.message);
@@ -438,6 +449,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     }
     return status;
   }
+
 
   async printMoneyDeposit(transferAmount) {
     const validation = this.validateTransferAmount(transferAmount);
