@@ -43,27 +43,37 @@ export class Provider {
   }
 
   async _detectPrinterAsync(transport, address, drivers, timeoutMs, printers) {
-    for (const driver of drivers) {
-      let channel;
-      try {
-        channel = transport.openChannel(address);
-        const printer = await Promise.race([
-          Promise.resolve(driver.connect(channel, this._serviceOptions, true, null)),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Detection timeout')), timeoutMs)),
-        ]);
-        if (printer && printer.info) {
-          const uri = `${driver.driverName}://${address}`;
-          printer.info.Uri = uri;
-          printers[uri] = printer;
-          logger.info(`Detected printer: ${uri} (${printer.info.Manufacturer} ${printer.info.Model} SN:${printer.info.SerialNumber})`);
-          return;
+    // Open one channel per address and share it across all driver attempts.
+    // Closing and reopening between each driver causes OS port-lock contention on Linux.
+    const driverTimeout = Math.min(timeoutMs, 5000);
+    const channel = transport.createFreshChannel(address);
+    let detected = false;
+    try {
+      for (const driver of drivers) {
+        logger.debug(`Trying ${driver.driverName} @ ${address} ...`);
+        try {
+          const connectPromise = driver.connect(channel, this._serviceOptions, true, null);
+          connectPromise.catch(() => {});
+          const printer = await Promise.race([
+            connectPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Detection timeout')), driverTimeout)),
+          ]);
+          if (printer && printer.info) {
+            const uri = `${driver.driverName}://${address}`;
+            printer.info.Uri = uri;
+            printers[uri] = printer;
+            transport.cacheChannel(address, channel);
+            detected = true;
+            logger.info(`Detected printer: ${uri} (${printer.info.Manufacturer} ${printer.info.Model} SN:${printer.info.SerialNumber})`);
+            return;
+          }
+        } catch (e) {
+          logger.debug(`${driver.driverName} @ ${address}: ${e.message}`);
         }
-      } catch (e) {
-        logger.debug(`${driver.driverName} @ ${address}: ${e.message}`);
-      } finally {
-        if (channel) {
-          try { transport.drop(channel); } catch (_) {}
-        }
+      }
+    } finally {
+      if (!detected) {
+        try { await transport.drop(channel); } catch (_) {}
       }
     }
   }

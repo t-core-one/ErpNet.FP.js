@@ -1,10 +1,6 @@
 import { readFileSync } from 'fs';
 import fs from 'fs';
 import path from 'path';
-
-const { version: SERVER_VERSION } = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-);
 import https from 'https';
 import express from 'express';
 import logger from './logger.js';
@@ -13,6 +9,12 @@ import { KeepAliveService } from './Service/KeepAliveService.js';
 import printersRouter from './Routes/printers.js';
 import serviceRouter from './Routes/service.js';
 
+const { version: SERVER_VERSION } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+);
+
+const WWWROOT = new URL('../wwwroot', import.meta.url).pathname;
+const LOGS_DIR = path.join(process.cwd(), 'logs');
 const APP_SETTINGS_FILE = path.join(process.cwd(), 'appsettings.json');
 
 function ensureAppSettings() {
@@ -35,6 +37,25 @@ function loadServerConfig() {
   }
 }
 
+function toCamelCase(obj) {
+  if (Array.isArray(obj)) return obj.map(toCamelCase);
+  if (obj !== null && typeof obj === 'object' && !(obj instanceof Date)) {
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+      // Only lowercase the first char when key looks like PascalCase:
+      // first char uppercase AND second char lowercase (so "Ok"→"ok", "SerialNumber"→"serialNumber"
+      // but "DT970048" or "URI" are left unchanged).
+      const isPascalCase = k.length > 1
+        && k.charCodeAt(0) >= 65 && k.charCodeAt(0) <= 90
+        && k.charCodeAt(1) >= 97 && k.charCodeAt(1) <= 122;
+      const key = isPascalCase ? k[0].toLowerCase() + k.slice(1) : k;
+      out[key] = toCamelCase(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
 async function main() {
   ensureAppSettings();
 
@@ -47,6 +68,14 @@ async function main() {
   const app = express();
 
   app.use(express.json({ limit: '500kb' }));
+  app.use(express.urlencoded({ extended: false, limit: '500kb' }));
+
+  // Convert PascalCase response keys to camelCase (matching C# ASP.NET default serializer)
+  app.use((req, res, next) => {
+    const orig = res.json.bind(res);
+    res.json = (data) => orig(toCamelCase(data));
+    next();
+  });
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -66,25 +95,42 @@ async function main() {
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
-      logger.info(`${req.method} ${req.url} ${res.statusCode} (${Date.now() - start}ms)`);
+      logger.info(`${req.method} ${req.originalUrl} ${res.statusCode} (${Date.now() - start}ms)`);
     });
     next();
   });
 
   app.locals.service = service;
 
-  // taskinfo must be registered before /:id
+  // API routes — taskinfo must be registered before /:id
   app.get('/printers/taskinfo', (req, res) => {
     const info = service.getTaskInfo(req.query.id);
     res.json(info);
   });
-
   app.use('/printers', printersRouter);
   app.use('/service', serviceRouter);
 
-  app.get('/', (req, res) => {
-    res.json({ status: 'ok', version: SERVER_VERSION });
+  // Debug log browser
+  app.get('/debug', (req, res) => {
+    fs.readdir(LOGS_DIR, (err, files) => {
+      if (err) return res.status(404).send('No logs directory');
+      const links = (files || [])
+        .filter(f => f.endsWith('.log') || f.endsWith('.log.gz'))
+        .sort()
+        .reverse()
+        .map(f => `<li><a href="/debug/${encodeURIComponent(f)}">${f}</a></li>`)
+        .join('');
+      res.type('html').send(`<!doctype html><html><body><h2>Debug logs</h2><ul>${links}</ul></body></html>`);
+    });
   });
+  app.get('/debug/:file', (req, res) => {
+    const filePath = path.join(LOGS_DIR, path.basename(req.params.file));
+    if (!filePath.startsWith(LOGS_DIR)) return res.status(403).end();
+    res.type('text/plain; charset=utf-8').sendFile(filePath);
+  });
+
+  // Admin UI — static files from wwwroot/
+  app.use(express.static(WWWROOT));
 
   const ssl = serverConfig.Ssl;
   if (ssl && ssl.CertFile && ssl.KeyFile) {

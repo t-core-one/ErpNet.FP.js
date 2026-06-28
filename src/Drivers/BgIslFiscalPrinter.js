@@ -45,7 +45,7 @@ const CMD = {
 export class BgIslFiscalPrinter extends BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
-    this._sequenceNumber = 0x20;
+    this._seqNum = 0;
 
     this.paymentTypeMappings = {
       [PaymentType.Cash]: '0',
@@ -79,54 +79,48 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   // ─── Frame building ──────────────────────────────────────────────────────
 
   _nextSeq() {
-    this._sequenceNumber = (this._sequenceNumber % 0xFF) + 0x20;
-    if (this._sequenceNumber > 0x7F) this._sequenceNumber = 0x20;
-    return this._sequenceNumber;
+    // FrameSequenceNumber cycles 0..0x5F; SEQ byte = 0x20 + counter (kept in printable ASCII)
+    this._seqNum = (this._seqNum + 1) % 0x60;
+    return 0x20 + this._seqNum;
   }
 
   _buildHostFrame(seq, cmd, data) {
-    // Frame: PREAMBLE len seq cmd SEPARATOR data POSTAMBLE BCC TERMINATOR
-    const cmdBuf = Buffer.from([cmd]);
-    const sepBuf = Buffer.from([SEPARATOR]);
-    const dataBuf = data ? iconv.encode(typeof data === 'string' ? data : '', 'cp1251') :
-                   (Buffer.isBuffer(data) ? data : Buffer.alloc(0));
-    const actualData = data instanceof Buffer ? data : dataBuf;
+    // Request frame: PREAMBLE | LEN | SEQ | CMD | data | POSTAMBLE | BCC[4] | TERMINATOR
+    // LEN = 0x20 + 4 + len(data)  — MarkerSpace offset keeps it out of control-char range
+    // There is NO separator byte in the request (separator only appears in the response).
+    // BCC = sum of [LEN, SEQ, CMD, data..., POSTAMBLE]
+    const dataLen = data ? data.length : 0;
+    const lenByte = 0x20 + 4 + dataLen;
 
-    const payload = Buffer.concat([cmdBuf, sepBuf, actualData]);
-    const lenByte = payload.length + 4;
+    let bcc = lenByte + seq + cmd + POSTAMBLE;
+    if (data) for (const b of data) bcc += b;
 
-    let bcc = 0;
-    for (const b of payload) bcc += b;
-    bcc += seq;
-    bcc += lenByte;
-
-    // BCC as 4 nibble bytes
-    const bccBytes = [
+    const bccBytes = Buffer.from([
       ((bcc >> 12) & 0x0F) + 0x30,
       ((bcc >> 8) & 0x0F) + 0x30,
       ((bcc >> 4) & 0x0F) + 0x30,
       (bcc & 0x0F) + 0x30,
-    ];
+    ]);
 
     return Buffer.concat([
-      Buffer.from([PREAMBLE, lenByte, seq]),
-      payload,
+      Buffer.from([PREAMBLE, lenByte, seq, cmd]),
+      data || Buffer.alloc(0),
       Buffer.from([POSTAMBLE]),
-      Buffer.from(bccBytes),
+      bccBytes,
       Buffer.from([TERMINATOR]),
     ]);
   }
 
-  async _sendCommand(cmd, data, retries = 3) {
+  async _sendCommand(cmd, data, retries = 3, timeoutMs = 5000) {
     const seq = this._nextSeq();
     const frameData = data instanceof Buffer ? data :
                       (data ? iconv.encode(data, 'cp1251') : null);
-    const frame = this._buildHostFrame(seq, cmd, frameData || Buffer.alloc(0));
+    const frame = this._buildHostFrame(seq, cmd, frameData || null);
 
     for (let attempt = 0; attempt < retries; attempt++) {
       await this._channel.write(frame);
 
-      const deadline = Date.now() + 5000;
+      const deadline = Date.now() + timeoutMs;
       let response = Buffer.alloc(0);
 
       while (Date.now() < deadline) {
@@ -144,13 +138,14 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       const termIdx = response.lastIndexOf(TERMINATOR);
       if (preIdx < 0 || termIdx <= preIdx) continue;
 
-      // Extract payload: after PREAMBLE(1) LEN(1) SEQ(1) CMD(1) SEP(1) = 5 bytes,
-      // ending before POSTAMBLE BCC(4) TERMINATOR(5 from end)
       const postIdx = response.lastIndexOf(POSTAMBLE, termIdx);
       if (postIdx < 0) continue;
 
-      const dataStart = preIdx + 5; // PREAMBLE LEN SEQ CMD SEP
-      const dataEnd = postIdx;
+      // Response: PREAMBLE | LEN | SEQ | CMD_ECHO | data | SEPARATOR | status | POSTAMBLE
+      // data starts right after CMD_ECHO (4 header bytes), ends at SEPARATOR
+      const dataStart = preIdx + 4;
+      const sepIdx = response.indexOf(SEPARATOR, dataStart);
+      const dataEnd = (sepIdx >= dataStart && sepIdx < postIdx) ? sepIdx : postIdx;
       const responseData = dataStart < dataEnd ? response.slice(dataStart, dataEnd) : Buffer.alloc(0);
       return responseData;
     }
@@ -158,7 +153,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   }
 
   async getRawDeviceInfo() {
-    const resp = await this._sendCommand(CMD.GetDeviceInfo, null);
+    const resp = await this._sendCommand(CMD.GetDeviceInfo, '1');
     return iconv.decode(resp || Buffer.alloc(0), 'cp1251');
   }
 
@@ -198,7 +193,8 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   }
 
   async setDateTime(datetime) {
-    const dt = datetime.DeviceDateTime || new Date();
+    const raw = datetime && datetime.DeviceDateTime;
+    const dt = raw ? new Date(raw) : new Date();
     const pad2 = n => String(n).padStart(2, '0');
     const str = `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${String(dt.getFullYear()).slice(-2)} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}`;
     const status = new DeviceStatusWithDateTime();
@@ -214,7 +210,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   async cash() {
     const status = new DeviceStatusWithCashAmount();
     try {
-      const resp = await this._sendCommand(CMD.GetReceiptStatus, null);
+      const resp = await this._sendCommand(CMD.GetReceiptStatus, 'T');
       const str = iconv.decode(resp, 'cp1251');
       // Response: open,total,receiptNum,... or similar; varies by device
       const parts = str.split(',');
@@ -270,31 +266,25 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   async _addSale(item) {
     const taxText = this.getTaxGroupText(item.TaxGroup || TaxGroup.TaxGroup1);
     const text = withMaxLength(item.Text || '', this.info.ItemTextMaxLength || 36);
-    const qty = (item.Quantity || 1).toFixed(3);
     const price = (item.UnitPrice || 0).toFixed(2);
+    const dept = item.Department || 0;
+    const qty = item.Quantity || 0;
 
-    let str = `${text}\t${taxText}${price}\t${qty}`;
-    if (item.Department > 0) {
-      str = `${text}\t${taxText}${price}\t${qty}\t${item.Department}`;
+    // Protocol: [text]\t[taxCd][price][*qty][,pct|$abs]
+    let str = dept <= 0
+      ? `${text}\t${taxText}${price}`
+      : `${text}\t${dept}\t${price}`;
+    if (qty !== 0) str += `*${qty}`;
+    if (item.PriceModifierType !== PriceModifierType.None) {
+      const val = item.PriceModifierValue || 0;
+      switch (item.PriceModifierType) {
+        case PriceModifierType.DiscountPercent:  str += `,${(-val).toFixed(2)}`; break;
+        case PriceModifierType.DiscountAmount:   str += `$${(-val).toFixed(2)}`; break;
+        case PriceModifierType.SurchargePercent: str += `,${val.toFixed(2)}`; break;
+        case PriceModifierType.SurchargeAmount:  str += `$${val.toFixed(2)}`; break;
+      }
     }
     await this._sendCommand(CMD.FiscalReceiptSale, str);
-
-    if (item.PriceModifierType !== PriceModifierType.None) {
-      await this._applyPriceModifier(item);
-    }
-  }
-
-  async _applyPriceModifier(item) {
-    const val = (item.PriceModifierValue || 0).toFixed(2);
-    let str;
-    switch (item.PriceModifierType) {
-      case PriceModifierType.DiscountPercent:   str = `,,-%${val}`; break;
-      case PriceModifierType.DiscountAmount:    str = `,,-${val}`; break;
-      case PriceModifierType.SurchargePercent:  str = `,,+%${val}`; break;
-      case PriceModifierType.SurchargeAmount:   str = `,,+${val}`; break;
-      default: return;
-    }
-    await this._sendCommand(CMD.Subtotal, str);
   }
 
   async _addComment(text) {
@@ -307,7 +297,8 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   async _addPayment(payment) {
     const typeText = this.getPaymentTypeText(payment.PaymentType);
     const amount = (payment.Amount || 0).toFixed(2);
-    await this._sendCommand(CMD.FiscalReceiptTotal, `${typeText}\t${amount}`);
+    // Protocol: \t{paymentType}{amount}  — tab comes first, type and amount are concatenated
+    await this._sendCommand(CMD.FiscalReceiptTotal, `\t${typeText}${amount}`);
   }
 
   async _closeReceipt() {
@@ -411,7 +402,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     const status = new DeviceStatusWithCashAmount();
     try {
       const amount = transferAmount.Amount.toFixed(2);
-      await this._sendCommand(CMD.MoneyTransfer, `0,${amount}`);
+      await this._sendCommand(CMD.MoneyTransfer, amount);
       status.Amount = transferAmount.Amount;
     } catch (e) {
       status.addError('E300', e.message);
@@ -424,8 +415,8 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     if (!validation.Ok) return validation;
     const status = new DeviceStatusWithCashAmount();
     try {
-      const amount = transferAmount.Amount.toFixed(2);
-      await this._sendCommand(CMD.MoneyTransfer, `1,${amount}`);
+      const amount = (-transferAmount.Amount).toFixed(2);
+      await this._sendCommand(CMD.MoneyTransfer, amount);
       status.Amount = transferAmount.Amount;
     } catch (e) {
       status.addError('E300', e.message);
@@ -436,7 +427,9 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   async printZReport(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
-      await this._sendCommand(CMD.PrintDailyReport, 'Z');
+      // No retries — re-sending a Z report closes the fiscal day twice.
+      // 90s timeout — the printer writes to fiscal memory which takes 20-40s.
+      await this._sendCommand(CMD.PrintDailyReport, null, 1, 90000);
     } catch (e) {
       status.addError('E400', e.message);
     }
@@ -446,7 +439,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   async printXReport(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
-      await this._sendCommand(CMD.PrintDailyReport, 'X');
+      await this._sendCommand(CMD.PrintDailyReport, '2');
     } catch (e) {
       status.addError('E401', e.message);
     }

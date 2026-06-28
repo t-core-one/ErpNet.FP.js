@@ -11,6 +11,7 @@ export class TcpChannel {
     this._port = port;
     this._socket = null;
     this._buffer = Buffer.alloc(0);
+    this._listenerAttached = false;
   }
 
   get descriptor() {
@@ -34,9 +35,12 @@ export class TcpChannel {
         reject(err);
       });
     });
-    socket.on('data', data => {
-      this._buffer = Buffer.concat([this._buffer, data]);
-    });
+    if (!this._listenerAttached) {
+      socket.on('data', data => {
+        this._buffer = Buffer.concat([this._buffer, data]);
+      });
+      this._listenerAttached = true;
+    }
     this._socket = socket;
   }
 
@@ -46,6 +50,8 @@ export class TcpChannel {
       this._socket = null;
     }
     this._buffer = Buffer.alloc(0);
+    this._listenerAttached = false;
+    return Promise.resolve();
   }
 
   async write(data) {
@@ -102,9 +108,7 @@ export class TcpTransport extends Transport {
 
   openChannel(address) {
     if (this._openedChannels.has(address)) {
-      const ch = this._openedChannels.get(address);
-      if (ch === null) throw new Error(`${address} disabled due to timeout`);
-      return ch;
+      return this._openedChannels.get(address);
     }
     const [host, port] = this._parseAddress(address);
     const channel = new TcpChannel(host, port);
@@ -112,7 +116,22 @@ export class TcpTransport extends Transport {
     return channel;
   }
 
-  drop(channel) {
-    channel.close();
+  createFreshChannel(address) {
+    const [host, port] = this._parseAddress(address);
+    return new TcpChannel(host, port);
+  }
+
+  cacheChannel(address, channel) {
+    this._openedChannels.set(address, channel);
+  }
+
+  async drop(channel) {
+    for (const [key, ch] of this._openedChannels.entries()) {
+      if (ch === channel) {
+        this._openedChannels.delete(key);
+        break;
+      }
+    }
+    await channel.close();
   }
 }

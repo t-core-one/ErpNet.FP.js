@@ -62,7 +62,7 @@ class FrameBuilder {
 export class BgZfpFiscalPrinter extends BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
-    this._sequenceNumber = 0x20;
+    this._seqNum = 0;
 
     this.paymentTypeMappings = {
       [PaymentType.Cash]: '0',
@@ -94,24 +94,25 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
   }
 
   _nextSeq() {
-    this._sequenceNumber = (this._sequenceNumber % MAX_SEQ) + 0x20;
-    return this._sequenceNumber;
+    // FrameSequenceNumber cycles 0..0x7F; SEQ byte = 0x20 + counter → range 0x20..0x9F
+    this._seqNum = (this._seqNum + 1) % 0x80;
+    return 0x20 + this._seqNum;
   }
 
   _buildHostFrame(seq, cmd, data) {
-    const cmdByte = Buffer.from([cmd]);
-    const payload = data ? Buffer.concat([cmdByte, data]) : cmdByte;
-    const len = payload.length + 4;
-    const lenByte = Buffer.from([len + 0x20]);
-    const seqByte = Buffer.from([seq]);
-    const prefix = Buffer.concat([lenByte, seqByte, payload]);
+    // Frame: STX | LEN | SEQ | CMD | data | CS[2] | ETX
+    // LEN = 0x20 + 3 + len(data)  (3 = SEQ + CMD + one marker — per Tremol ZFP spec)
+    // CS = XOR of [LEN, SEQ, CMD, data...]
+    const dataLen = data ? data.length : 0;
+    const lenByte = 0x20 + 3 + dataLen;
 
-    let cs = 0;
-    for (const b of prefix) cs ^= b;
+    // Compute CS over [LEN, SEQ, CMD, data...]
+    let cs = lenByte ^ seq ^ cmd;
+    if (data) for (const b of data) cs ^= b;
 
     return Buffer.concat([
-      Buffer.from([STX]),
-      prefix,
+      Buffer.from([STX, lenByte, seq, cmd]),
+      data || Buffer.alloc(0),
       Buffer.from([(cs >> 4) + 0x30, (cs & 0x0F) + 0x30]),
       Buffer.from([ETX]),
     ]);
@@ -141,7 +142,9 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
       const etxIdx = response.lastIndexOf(ETX);
       if (stxIdx < 0 || etxIdx <= stxIdx) continue;
 
-      const dataStart = stxIdx + 4 + 4;
+      // Data frame: STX | LEN | SEQ | CMD_ECHO | data | CS[2] | ETX
+      // data starts at stxIdx+4 (after STX, LEN, SEQ, CMD_ECHO), ends before CS[2]
+      const dataStart = stxIdx + 4;
       const dataEnd = etxIdx - 2;
       return dataEnd > dataStart ? response.slice(dataStart, dataEnd) : Buffer.alloc(0);
     }

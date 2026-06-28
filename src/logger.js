@@ -12,11 +12,12 @@ const logFormat = format.combine(
 );
 
 const logger = createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: 'debug',
   format: logFormat,
   transports: [
-    new transports.Console(),
+    new transports.Console({ level: process.env.LOG_LEVEL || 'info' }),
     new transports.DailyRotateFile({
+      level: 'debug',
       dirname: LOG_DIR,
       filename: 'debug-%DATE%.log',
       datePattern: 'YYYYMMDD',

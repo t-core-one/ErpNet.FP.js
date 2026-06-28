@@ -37,23 +37,39 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     };
   }
 
+  // Protocol (no USN): {op}\t{pass}\t1\t\t
+  // Protocol (with USN): {op}\t{pass}\t{usn}\t1\t\t
   _formatOpenReceipt(receipt) {
     const op = receipt.Operator || '1';
-    const pass = receipt.OperatorPassword || '';
+    const pass = receipt.OperatorPassword || '0000';
     const usn = receipt.UniqueSaleNumber || '';
-    return `${op}\t${pass}\t\t${usn}`;
+    return usn
+      ? [op, pass, usn, '1', '', ''].join('\t')
+      : [op, pass, '1', '', ''].join('\t');
   }
 
+  getReversalReasonText(reason) {
+    switch (reason) {
+      case 1 /* OperatorError */: return '0';
+      case 2 /* Refund */: return '1';
+      case 3 /* TaxBaseReduction */: return '2';
+      default: return '0';
+    }
+  }
+
+  // Protocol: {op}\t{pass}\t1\t{reason}\t{receiptNum}\t{dd-MM-yy HH:mm:ss}\t{fmSerial}\t\t\t{usn}\t
   _formatOpenReversalReceipt(reversalReceipt) {
     const op = reversalReceipt.Operator || '1';
-    const pass = reversalReceipt.OperatorPassword || '';
+    const pass = reversalReceipt.OperatorPassword || '0000';
     const usn = reversalReceipt.UniqueSaleNumber || '';
     const receiptNum = reversalReceipt.ReceiptNumber || '';
     const fmSerial = reversalReceipt.FiscalMemorySerialNumber || '';
     const reason = this.getReversalReasonText(reversalReceipt.Reason);
-    const dtStr = reversalReceipt.ReceiptDateTime
-      ? this._formatDateForReversal(reversalReceipt.ReceiptDateTime) : '';
-    return `${op}\t${pass}\t\t${usn}\t${reason}\t${receiptNum}\t${fmSerial}\t${dtStr}`;
+    const dt = reversalReceipt.ReceiptDateTime || new Date();
+    const pad2 = n => String(n).padStart(2, '0');
+    const yr2 = String(dt.getFullYear()).slice(-2);
+    const dtStr = `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${yr2} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}`;
+    return [op, pass, '1', reason, receiptNum, dtStr, fmSerial, '', '', '', usn, ''].join('\t');
   }
 
   async _openReversalReceipt(reversalReceipt) {
@@ -62,35 +78,28 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
 
   async _addSale(item) {
     const taxText = this.getTaxGroupText(item.TaxGroup || TaxGroup.TaxGroup1);
-    const text = withMaxLength(item.Text || '', this.info.ItemTextMaxLength || 36);
-    const qty = (item.Quantity || 1).toFixed(3);
+    const text = withMaxLength(item.Text || '', this.info.ItemTextMaxLength || 72);
     const price = (item.UnitPrice || 0).toFixed(2);
     const dept = item.Department || 0;
-
-    let str;
-    if (dept > 0) {
-      str = `${text}\t${taxText}${price}\t${qty}\t${dept}`;
-    } else {
-      str = `${text}\t${taxText}${price}\t${qty}`;
-    }
+    const qty = item.Quantity || 0;
+    const modType = this._priceModifierTypeCode(item.PriceModifierType);
+    const modVal = item.PriceModifierType !== PriceModifierType.None
+      ? (item.PriceModifierValue || 0).toFixed(2) : '0.00';
+    // Protocol: {text}\t{taxCd}\t{price}\t{qty}\t{modType}\t{modValue}\t{dept}\t
+    const str = [text, taxText, price,
+      qty !== 0 ? String(qty) : '',
+      modType, modVal, dept > 0 ? String(dept) : '', ''].join('\t');
     await this._sendCommand(CMD.FiscalReceiptSale, str);
-
-    if (item.PriceModifierType !== PriceModifierType.None) {
-      await this._applyPriceModifier(item);
-    }
   }
 
-  async _applyPriceModifier(item) {
-    const val = (item.PriceModifierValue || 0).toFixed(2);
-    let str;
-    switch (item.PriceModifierType) {
-      case PriceModifierType.DiscountPercent:   str = `\t\t-%${val}`; break;
-      case PriceModifierType.DiscountAmount:    str = `\t\t-${val}`; break;
-      case PriceModifierType.SurchargePercent:  str = `\t\t+%${val}`; break;
-      case PriceModifierType.SurchargeAmount:   str = `\t\t+${val}`; break;
-      default: return;
+  _priceModifierTypeCode(type) {
+    switch (type) {
+      case PriceModifierType.DiscountPercent:  return '2';
+      case PriceModifierType.DiscountAmount:   return '4';
+      case PriceModifierType.SurchargePercent: return '1';
+      case PriceModifierType.SurchargeAmount:  return '3';
+      default: return '0';
     }
-    await this._sendCommand(CMD.Subtotal, str);
   }
 
   async _addComment(text) {
@@ -101,17 +110,12 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
   }
 
   async _addPayment(payment) {
+    // Protocol: {PaidMode}\t{Amount}\t{Type}\t   where Type=1 (normal) or 2 (pinpad)
     const typeText = this.getPaymentTypeText(payment.PaymentType);
     const amount = (payment.Amount || 0).toFixed(2);
-    let str = `${typeText}\t${amount}\t`;
-
-    if (this.info.UsePaymentTerminal && payment.PaymentType === PaymentType.Card) {
-      // Use payment terminal
-      str = `${typeText}\t${amount}\t1`;
-    }
-
+    const terminalFlag = (this.info.UsePaymentTerminal && payment.PaymentType === PaymentType.Card) ? '2' : '1';
+    const str = [typeText, amount, terminalFlag, ''].join('\t');
     const resp = await this._sendCommand(CMD.FiscalReceiptTotal, str);
-    // Check for pinpad errors if payment terminal used
     if (this.info.UsePaymentTerminal) {
       const respStr = iconv.decode(resp || Buffer.alloc(0), 'cp1251');
       this._checkPinpadResponse(respStr);
@@ -130,7 +134,8 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
   }
 
   async setDateTime(datetime) {
-    const dt = datetime.DeviceDateTime || new Date();
+    const raw = datetime && datetime.DeviceDateTime;
+    const dt = raw ? new Date(raw) : new Date();
     const pad2 = n => String(n).padStart(2, '0');
     const str = `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${String(dt.getFullYear()).slice(-2)} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}\t`;
     const status = new DeviceStatusWithDateTime();
@@ -146,10 +151,16 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
   async cash() {
     const status = new DeviceStatusWithCashAmount();
     try {
-      const resp = await this._sendCommand(CMD.GetReceiptStatus, null);
+      const resp = await this._sendCommand(CMD.MoneyTransfer, '0\t0\t');
       const str = iconv.decode(resp || Buffer.alloc(0), 'cp1251');
       const parts = str.split('\t');
-      status.Amount = parseFloat(parts[1] || '0') || 0;
+      if (parts.length !== 5) {
+        status.addError('E409', 'Invalid format of cash response');
+        return status;
+      }
+      const amountStr = parts[1] || '0';
+      const raw = parseFloat(amountStr) || 0;
+      status.Amount = amountStr.includes('.') ? raw : raw / 100;
     } catch (e) {
       status.addError('E003', e.message);
     }
@@ -159,7 +170,7 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
   async printZReport(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
-      await this._sendCommand(CMD.PrintDailyReport, 'Z\t');
+      await this._sendCommand(CMD.PrintDailyReport, 'Z\t', 1, 90000);
     } catch (e) {
       status.addError('E400', e.message);
     }
@@ -169,7 +180,7 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
   async printXReport(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
-      await this._sendCommand(CMD.PrintDailyReport, 'X\t');
+      await this._sendCommand(CMD.PrintDailyReport, 'X\t', 3, 30000);
     } catch (e) {
       status.addError('E401', e.message);
     }
@@ -241,31 +252,35 @@ function getPrintColumnsOfModel(model) {
 }
 
 function parseDeviceInfo(rawDeviceInfo, autoDetect) {
-  // Datecs X: 8 fields (comma and tab mixed)
+  // Datecs X response (split by comma, space, or tab produces 8 fields):
+  // Model,FW_part1,FW_part2,FW_part3,Flags1,Flags2,SerialNumber,FMSerial
   const fields = rawDeviceInfo.split(/[,\t ]/);
-  if (fields.length < 6) throw new InvalidDeviceInfoException(`Cannot parse Datecs X device info: ${rawDeviceInfo}`);
+  if (fields.length !== 8) throw new InvalidDeviceInfoException(`rawDeviceInfo must contain 8 fields for '${DRIVER_NAME}'`);
 
-  const serialNumber = fields[0].trim();
-  const fmSerial = fields[1].trim();
-  const manufacturer = fields[2] ? fields[2].trim() : 'Datecs';
-  const model = fields[3] ? fields[3].trim() : '';
-  const firmware = fields[4] ? fields[4].trim() : '';
-  const taxId = fields[5] ? fields[5].trim() : '';
+  const model = fields[0].trim();
+  const firmware = `${fields[1]} ${fields[2]} ${fields[3]}`.trim();
+  const serialNumber = fields[6].trim();
+  const fmSerial = fields[7].trim();
 
-  if (autoDetect && !SERIAL_NUMBER_PREFIXES.some(p => serialNumber.startsWith(p))) {
-    throw new InvalidDeviceInfoException(`Serial ${serialNumber} must start with DT or DA for ${DRIVER_NAME}`);
+  if (autoDetect) {
+    if (serialNumber.length !== 8) throw new InvalidDeviceInfoException(`serial number must be 8 characters for '${DRIVER_NAME}'`);
+    if (!SERIAL_NUMBER_PREFIXES.some(p => serialNumber.startsWith(p))) {
+      throw new InvalidDeviceInfoException(`Serial ${serialNumber} must start with DT or DA for ${DRIVER_NAME}`);
+    }
+    if (!model.endsWith('X') && !model.endsWith('XR') && !model.endsWith('XE')) {
+      throw new InvalidDeviceInfoException(`incompatible with '${DRIVER_NAME}'`);
+    }
   }
 
   const printColumns = getPrintColumnsOfModel(model);
   const info = new DeviceInfo();
   info.SerialNumber = serialNumber;
   info.FiscalMemorySerialNumber = fmSerial;
-  info.Manufacturer = manufacturer;
+  info.Manufacturer = 'Datecs';
   info.Model = model;
   info.FirmwareVersion = firmware;
-  info.TaxIdentificationNumber = taxId;
   info.CommentTextMaxLength = printColumns - 2;
-  info.ItemTextMaxLength = printColumns - 2;
+  info.ItemTextMaxLength = 72;
   info.OperatorPasswordMaxLength = 8;
   info.SupportPaymentTerminal = true;
   return info;

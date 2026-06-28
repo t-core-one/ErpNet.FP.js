@@ -2,7 +2,6 @@ import { SerialPort } from 'serialport';
 import { Transport } from '../Core/Transport.js';
 
 const DEFAULT_BAUD_RATE = 115200;
-const IDLE_TIMEOUT_MS = 3000;
 const READ_TIMEOUT_MS = 500;
 
 export class ComChannel {
@@ -11,7 +10,7 @@ export class ComChannel {
     this._baudRate = baudRate;
     this._port = null;
     this._buffer = Buffer.alloc(0);
-    this._idleTimer = null;
+    this._listenerAttached = false;
   }
 
   get descriptor() {
@@ -28,27 +27,23 @@ export class ComChannel {
     await new Promise((resolve, reject) => {
       this._port.open(err => err ? reject(err) : resolve());
     });
-    this._port.on('data', data => {
-      this._buffer = Buffer.concat([this._buffer, data]);
-    });
-  }
-
-  _resetIdleTimer() {
-    if (this._idleTimer) clearTimeout(this._idleTimer);
-    this._idleTimer = setTimeout(() => this.close(), IDLE_TIMEOUT_MS);
+    if (!this._listenerAttached) {
+      this._port.on('data', data => {
+        this._buffer = Buffer.concat([this._buffer, data]);
+      });
+      this._listenerAttached = true;
+    }
   }
 
   close() {
-    if (this._idleTimer) clearTimeout(this._idleTimer);
-    this._idleTimer = null;
     if (this._port && this._port.isOpen) {
-      this._port.close(() => {});
+      return new Promise((resolve) => this._port.close(resolve));
     }
+    return Promise.resolve();
   }
 
   async write(data) {
     await this.open();
-    this._resetIdleTimer();
     await new Promise((resolve, reject) => {
       this._port.write(data, err => err ? reject(err) : resolve());
     });
@@ -93,7 +88,9 @@ export class ComTransport extends Transport {
   async getAvailableAddresses() {
     try {
       const ports = await SerialPort.list();
-      return ports.map(p => p.path);
+      return ports
+        .filter(p => p.manufacturer || p.vendorId || p.serialNumber)
+        .map(p => p.path);
     } catch (e) {
       return [];
     }
@@ -101,16 +98,28 @@ export class ComTransport extends Transport {
 
   openChannel(address) {
     if (this._openedChannels.has(address)) {
-      const ch = this._openedChannels.get(address);
-      if (ch === null) throw new Error(`${address} disabled due to timeout`);
-      return ch;
+      return this._openedChannels.get(address);
     }
     const channel = new ComChannel(address, DEFAULT_BAUD_RATE);
     this._openedChannels.set(address, channel);
     return channel;
   }
 
-  drop(channel) {
-    channel.close();
+  createFreshChannel(address) {
+    return new ComChannel(address, DEFAULT_BAUD_RATE);
+  }
+
+  cacheChannel(address, channel) {
+    this._openedChannels.set(address, channel);
+  }
+
+  async drop(channel) {
+    for (const [key, ch] of this._openedChannels.entries()) {
+      if (ch === channel) {
+        this._openedChannels.delete(key);
+        break;
+      }
+    }
+    await channel.close();
   }
 }
