@@ -495,9 +495,20 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     return status;
   }
 
+  async _abortIfReceiptOpen() {
+    try {
+      const resp = await this._sendCommand(CMD.GetReceiptStatus, 'T');
+      const str = iconv.decode(resp || Buffer.alloc(0), 'cp1251').trim();
+      if (str.startsWith('1,')) {
+        await this._sendCommand(CMD.AbortFiscalReceipt, null);
+      }
+    } catch (_) {}
+  }
+
   async printZReport(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
+      await this._abortIfReceiptOpen();
       // No retries — re-sending a Z report closes the fiscal day twice.
       // 90s timeout — the printer writes to fiscal memory which takes 20-40s.
       await this._sendCommand(CMD.PrintDailyReport, null, 1, 90000);
@@ -510,6 +521,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   async printXReport(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
+      await this._abortIfReceiptOpen();
       await this._sendCommand(CMD.PrintDailyReport, '2');
     } catch (e) {
       status.addError('E401', e.message);
