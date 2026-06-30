@@ -91,6 +91,17 @@ async function main() {
 
   app.locals.service = service;
 
+  // Device info — returns FQDN and service URL so Odoo admin can copy-paste
+  app.get('/', (req, res) => {
+    const fqdn = process.env.DEVICE_FQDN || null;
+    res.json({
+      deviceId: process.env.DEVICE_ID || null,
+      fqdn,
+      serviceUrl: fqdn ? `https://${fqdn}:${port}` : null,
+      version: SERVER_VERSION,
+    });
+  });
+
   // API routes — taskinfo must be registered before /:id
   app.get('/printers/taskinfo', (req, res) => {
     const info = service.getTaskInfo(req.query.id);
@@ -121,11 +132,13 @@ async function main() {
   // Admin UI — static files from wwwroot/
   app.use(express.static(WWWROOT));
 
-  const ssl = serverConfig.Ssl;
-  if (ssl && ssl.CertFile && ssl.KeyFile) {
+  const ssl = serverConfig.Ssl || {};
+  const certFile = process.env.SSL_CERT_FILE || ssl.CertFile;
+  const keyFile  = process.env.SSL_KEY_FILE  || ssl.KeyFile;
+  if (certFile && keyFile) {
     const tlsOptions = {
-      cert: fs.readFileSync(ssl.CertFile),
-      key: fs.readFileSync(ssl.KeyFile),
+      cert: fs.readFileSync(certFile),
+      key:  fs.readFileSync(keyFile),
     };
     https.createServer(tlsOptions, app).listen(port, () => {
       logger.info(`ErpNet.FP service started on https://0.0.0.0:${port}`);
