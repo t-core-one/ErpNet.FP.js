@@ -92,7 +92,7 @@ async function main() {
   app.locals.service = service;
 
   // Device info — returns FQDN and service URL so Odoo admin can copy-paste
-  app.get('/', (req, res) => {
+  app.get('/info', (req, res) => {
     const fqdn = process.env.DEVICE_FQDN || null;
     res.json({
       deviceId: process.env.DEVICE_ID || null,
