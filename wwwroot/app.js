@@ -675,6 +675,30 @@ function protocolSelected(protocolTemplate) {
     }
 }
 
+function getDeviceInfo() {
+    $.ajax({
+        type: 'GET',
+        url: '/info',
+        dataType: 'json',
+        timeout: 5000,
+        success: function (data) {
+            if (data.deviceId) {
+                $('#DeviceInfoId').text(data.deviceId);
+                $('#DeviceInfoUrl').text(data.serviceUrl).attr('href', data.serviceUrl);
+                $('#DeviceInfoSection').show();
+            }
+        }
+    });
+}
+
+function copyServiceUrl() {
+    var url = $('#DeviceInfoUrl').text();
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(function () {
+        showToastMessage('Service URL copied to clipboard!');
+    });
+}
+
 function showToastMessage(msg) {
     var toastArea = $("#ToastArea")
     toastArea.html('<span class="toast">' + msg + '</span>')
@@ -683,5 +707,6 @@ function showToastMessage(msg) {
 
 $(function () {
     getServerVariables()
-    getPrinterProperties()    
+    getPrinterProperties()
+    getDeviceInfo()
 })

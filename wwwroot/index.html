@@ -27,6 +27,24 @@
                 </button>
             </div>
         </div>
+        <fieldset id="DeviceInfoSection">
+            <legend>Device Info</legend>
+            <div class="input-group vertical">
+                <table class="device-info-table">
+                    <tr>
+                        <td class="device-info-label">Device ID</td>
+                        <td><strong id="DeviceInfoId"></strong></td>
+                    </tr>
+                    <tr>
+                        <td class="device-info-label">Odoo Service URL</td>
+                        <td>
+                            <strong><a id="DeviceInfoUrl" href="#" target="_blank" aria-label="Odoo service URL"></a></strong>
+                            &nbsp;<button type="button" class="small primary device-info-copy" onclick="copyServiceUrl()">Copy</button>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </fieldset>
         <fieldset>
             <legend>Available Printers</legend>
             <div id="PrintersList" class="collapse">
