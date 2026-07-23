@@ -127,12 +127,15 @@ when the `USN_ADMIN_TOKEN` env var is set, requires a matching
 ### Recovery after a state loss
 
 The УНП recorded in Odoo (`pos.order.fiscal_usn`) is the audited system of record
-and the recovery source of truth. **Odoo's max is a floor, not the exact
-high-water mark** — abandoned carts and offline-queued orders burn numbers that
-never reach Odoo — so recovery must bias **high**:
+and the recovery source of truth. Under the СУПТО retention model (Наредба № Н-18
+Прил.29 т.12), **every issued УНП belongs to a retained order — completed or
+cancelled/анулирана — and all are synced**, so once every terminal is drained
+Odoo's `MAX` is the **exact** high-water mark. Н-18 forbids gaps, so recovery
+reseeds to that exact value, no margin:
 
-1. Stop selling on the affected device; let all terminals sync their offline
-   queues so recent numbers reach Odoo.
+1. Stop selling on the affected device and **drain every terminal**: finish or
+   cancel all open sales, then let the offline queues fully sync so every issued
+   number (incl. cancelled sales) has reached Odoo.
 2. Measure the per-device high-water mark:
 
    ```sql
@@ -140,13 +143,12 @@ never reach Odoo — so recovery must bias **high**:
    FROM pos_order WHERE fiscal_usn LIKE 'DT970048-%';
    ```
 
-3. Reseed forward: `POST /usn/init { startSequence: max + margin, force: true }`
-   with `margin ≥ peak_daily_sales × max_offline_days` (min 1000). The gap is
-   legal under Н-18; duplicates are not.
+3. Reseed forward: `POST /usn/init { startSequence: <max>, force: true }`.
 
 The Odoo module `plana_pos_fiscal` automates steps 2–3 via the
 **Initialize / Recover УНП** button on the POS config (run it from a browser on
-the device's LAN).
+the device's LAN). Only if a full drain is impossible should an operator add a
+margin — accepting a documented gap in preference to a duplicate.
 
 ## Running
 
