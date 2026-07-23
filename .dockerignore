@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log*
+logs
+*.log
+.git
+.gitignore
+usn-state.json
+usn-state.json.bak
+usn-state.json.tmp
+.erpnet-fp
+certs
+*.pem
+.env
+Dockerfile
+.dockerignore
+docker-compose.yml
+.env.example

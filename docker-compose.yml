@@ -1,0 +1,34 @@
+# ErpNet.FP.js containerized with production-faithful TLS.
+#
+# The entrypoint self-provisions against the ErpNet.FP.DNS service, registers
+# this host's LAN IP, fetches the *.fiscal.t-core.io wildcard cert, and serves
+# HTTPS at https://<DEVICE_ID>.fiscal.t-core.io:8001.
+#
+# Setup:  cp .env.example .env  &&  edit .env (set INSTALL_TOKEN, DEVICE_ID)
+# Run:    docker compose up -d --build
+#
+# Host networking is used on purpose: the container detects/registers the real
+# LAN IP (not a bridge IP), is reachable on the LAN like an RPi, and can reach a
+# SIS emulator running on the host at localhost:8199.
+services:
+  erpnet-fp:
+    build: .
+    image: erpnet-fp:local
+    container_name: erpnet-fp
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      DNS_SERVICE_URL: ${DNS_SERVICE_URL:-https://erpnet-fp-dns.t-core.io}
+      DEVICE_ID: ${DEVICE_ID:-dev-odoo16-fp}
+      PORT: ${PORT:-8001}
+      CERT_DIR: /data/certs
+    volumes:
+      # Durable УНП/invoice counter state + device token + wildcard cert.
+      - erpnet-fp-data:/data
+      # Edit runtime config on the host (Printers, AutoDetect, ...).
+      - ./appsettings.json:/app/appsettings.json
+    restart: unless-stopped
+
+volumes:
+  erpnet-fp-data:
