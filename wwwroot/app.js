@@ -180,11 +180,41 @@ function showUsnState(printerId) {
                 '<tr><td class="device-info-label">Next УНП</td><td><strong>' + next + '</strong></td></tr>' +
                 '<tr><td class="device-info-label">Remembered sale keys</td><td>' + ((s && s.issuedKeys != null) ? s.issuedKeys : 0) + '</td></tr>' +
                 '<tr><td class="device-info-label">State file</td><td><code>' + ((s && s.statePath) || '&mdash;') + '</code></td></tr>' +
-                '</tbody></table>'
+                '</tbody></table>' +
+                '<div id="invnum-state-' + printerId + '"></div>'
             )
+            showInvoiceNumberState(printerId)
         },
         error: function () {
             container.html('<mark class="tag" style="background:#d1242f;color:#fff;">Could not load УНП state</mark>')
+        }
+    })
+}
+
+// Invoice-number counter state (only meaningful when invoice-on-receipt is used).
+function showInvoiceNumberState(printerId) {
+    var container = $('#invnum-state-' + printerId)
+    if (!container.length) return
+    $.ajax({
+        type: 'GET',
+        url: '/printers/' + encodeURIComponent(printerId) + '/invoicenumber',
+        dataType: 'json',
+        timeout: 15000,
+        success: function (s) {
+            var badge = (s && s.initialized)
+                ? '<mark class="tag" style="background:#3fb950;color:#fff;">initialized</mark>'
+                : '<mark class="tag" style="background:#8b949e;color:#fff;">not used</mark>'
+            container.html(
+                '<div class="section dark" style="margin-top:0.4em;"><h5 style="margin:0;">Invoice numbering&nbsp;' + badge + '</h5></div>' +
+                '<table class="device-info-table"><tbody>' +
+                '<tr><td class="device-info-label">Current sequence (raw, high-water mark)</td><td><strong>' + ((s && s.counter != null) ? s.counter : 0) + '</strong></td></tr>' +
+                '<tr><td class="device-info-label">Remembered invoice keys</td><td>' + ((s && s.issuedKeys != null) ? s.issuedKeys : 0) + '</td></tr>' +
+                '</tbody></table>' +
+                '<p><small>Odoo prepends the POS-centre prefix and records the full number as the invoice’s account.move.name.</small></p>'
+            )
+        },
+        error: function () {
+            container.html('')
         }
     })
 }

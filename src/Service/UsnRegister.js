@@ -9,6 +9,10 @@ import logger from '../logger.js';
 const SERIAL_REGEX = /^[A-Z]{2}[0-9]{6}$/;
 const OPERATOR_REGEX = /^[A-Z0-9]{4}$/;
 const MAX_SEQUENCE = 9999999;
+// Invoice-number sequence: the print server allocates the raw sequence; Odoo
+// prepends the POS-centre prefix and zero-pads to the legal 10-digit width and
+// enforces the actual per-prefix ceiling. 10 digits is the absolute hard cap.
+const MAX_INVOICE_SEQUENCE = 9999999999;
 const STATE_VERSION = 2;
 
 // How many recently-issued idempotency keys to remember per device (retry/reload
@@ -326,5 +330,133 @@ export class UsnRegister {
     const serial = String(serialNumber || '').trim().toUpperCase();
     const dev = this._state.devices[serial];
     return dev && Array.isArray(dev.order) ? dev.order.length : 0;
+  }
+
+  // ─── Invoice-number counter (parallel per-device series) ──────────────────
+  //
+  // A second gapless, durable, single-writer counter per device, allocated with
+  // the same offline safety as the УНП. It holds only the RAW sequence integer;
+  // Odoo owns the format (POS-centre prefix + 10-digit zero-pad), records each
+  // number as the invoice's account.move.name, and reseeds this counter from the
+  // recorded MAX on recovery. Kept as a `dev.invoice` sub-state so the УНП paths
+  // above are untouched. Invoice numbering must be initialized separately, on a
+  // device that already has УНП state.
+
+  isInvoiceInitialized(serialNumber) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    const dev = this._state.devices[serial];
+    return !!(dev && dev.invoice);
+  }
+
+  /** Initialize/reseed the invoice-number counter. Forward-only unless allowDecrease. */
+  initializeInvoiceDevice(serialNumber, startSequence = 0, { force = false, allowDecrease = false } = {}) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    if (!SERIAL_REGEX.test(serial)) {
+      throw new Error(`Invalid device serial "${serialNumber}" (expected 2 letters + 6 digits)`);
+    }
+    const start = Number(startSequence);
+    if (!Number.isInteger(start) || start < 0 || start > MAX_INVOICE_SEQUENCE) {
+      throw new Error(`Invalid startSequence ${startSequence} (expected integer 0..${MAX_INVOICE_SEQUENCE})`);
+    }
+    const dev = this._existingDevice(serial);
+    if (!dev) {
+      throw new Error(
+        `Device ${serial} has no УНП state; initialize the device (УНП) before invoice numbering.`
+      );
+    }
+    const existing = dev.invoice;
+    if (existing && !force) {
+      throw new Error(
+        `Invoice numbering is already initialized for device ${serial} (counter=${existing.counter}). ` +
+        `Pass force=true to reseed (recovery).`
+      );
+    }
+    if (existing && start < existing.counter && !allowDecrease) {
+      throw new Error(
+        `Refusing to reseed device ${serial} invoice counter to a LOWER value (${existing.counter} -> ${start}); ` +
+        `this would repeat already-issued invoice numbers. Reseed forward, or pass allowDecrease=true if certain.`
+      );
+    }
+    const prevCounter = existing ? existing.counter : null;
+    const inv = existing || { counter: 0, issued: {}, order: [] };
+    inv.counter = start;
+    dev.invoice = inv;
+    try {
+      this._persist();
+    } catch (e) {
+      if (existing) existing.counter = prevCounter;
+      else delete dev.invoice;
+      throw e;
+    }
+    logger.info(`Initialized invoice numbering for device ${serial} at counter ${start}${force ? ' (force/reseed)' : ''}`);
+    return { serialNumber: serial, counter: inv.counter };
+  }
+
+  /**
+   * Reserve (or idempotently re-return) the next raw invoice sequence for a sale.
+   * Fail-closed and durable just like reserve(): a missing device / uninitialized
+   * invoice counter refuses rather than inventing a starting number.
+   * @returns {{ invoiceNumber: number, sequenceNumber: number, reused: boolean }}
+   */
+  reserveInvoiceNumber({ serialNumber, idempotencyKey } = {}) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    if (!SERIAL_REGEX.test(serial)) {
+      throw new Error(`Invalid device serial "${serialNumber}" for invoice number (expected 2 letters + 6 digits)`);
+    }
+    const key = String(idempotencyKey || '').trim();
+    if (!key) {
+      throw new Error('idempotencyKey is required for invoice number reservation');
+    }
+    const dev = this._existingDevice(serial);
+    if (!dev || !dev.invoice) {
+      throw new Error(
+        `Invoice numbering is not initialized for device ${serial}. Initialize it (0 for a new device, ` +
+        `or the high-water mark recovered from Odoo) before minting. This guard prevents duplicate ` +
+        `invoice numbers after a lost state file.`
+      );
+    }
+    const inv = dev.invoice;
+    if (!inv.issued || typeof inv.issued !== 'object') inv.issued = {};
+    if (!Array.isArray(inv.order)) inv.order = Object.keys(inv.issued);
+
+    const existing = inv.issued[key];
+    if (existing != null) {
+      return { invoiceNumber: existing, sequenceNumber: existing, reused: true };
+    }
+    if (inv.counter >= MAX_INVOICE_SEQUENCE) {
+      throw new Error(`Invoice sequence exhausted for device ${serial} (reached ${MAX_INVOICE_SEQUENCE})`);
+    }
+    const seq = inv.counter + 1;
+    inv.counter = seq;
+    inv.issued[key] = seq;
+    inv.order.push(key);
+    try {
+      this._persist();
+    } catch (e) {
+      inv.counter = seq - 1;
+      delete inv.issued[key];
+      inv.order.pop();
+      throw e;
+    }
+    while (inv.order.length > this._maxIssuedPerDevice) {
+      const oldest = inv.order.shift();
+      delete inv.issued[oldest];
+    }
+    logger.info(`Reserved invoice sequence ${seq} for device ${serial} (key=${key})`);
+    return { invoiceNumber: seq, sequenceNumber: seq, reused: false };
+  }
+
+  /** Current invoice sequence value for a device (0 if none/uninitialized). */
+  currentInvoice(serialNumber) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    const dev = this._state.devices[serial];
+    return dev && dev.invoice ? dev.invoice.counter : 0;
+  }
+
+  /** How many recently-issued invoice keys are remembered for a device. */
+  invoiceIssuedCount(serialNumber) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    const dev = this._state.devices[serial];
+    return dev && dev.invoice && Array.isArray(dev.invoice.order) ? dev.invoice.order.length : 0;
   }
 }

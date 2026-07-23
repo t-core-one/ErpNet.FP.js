@@ -214,3 +214,54 @@ describe('UsnRegister idempotency pruning', () => {
     expect(recent.reused).toBe(true);
   });
 });
+
+describe('UsnRegister invoice-number counter', () => {
+  it('refuses to reserve before invoice numbering is initialized', () => {
+    const reg = makeInitialized('DT970048', 0); // УНП initialized, invoice not
+    expect(() =>
+      reg.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'a' })
+    ).toThrow(/not initialized/i);
+  });
+
+  it('requires the device (УНП) to exist before invoice numbering can be initialized', () => {
+    const reg = make();
+    expect(() => reg.initializeInvoiceDevice('DT970048', 0)).toThrow(/no УНП state|before invoice/i);
+  });
+
+  it('mints raw invoice sequences after init, idempotent by key', () => {
+    const reg = makeInitialized('DT970048', 0);
+    reg.initializeInvoiceDevice('DT970048', 0);
+    expect(reg.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'o1' }).invoiceNumber).toBe(1);
+    expect(reg.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'o2' }).invoiceNumber).toBe(2);
+    const again = reg.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'o1' });
+    expect(again.invoiceNumber).toBe(1);
+    expect(again.reused).toBe(true);
+  });
+
+  it('keeps the invoice counter independent from the УНП counter', () => {
+    const reg = makeInitialized('DT970048', 100);
+    reg.initializeInvoiceDevice('DT970048', 5000);
+    const usn = reg.reserve({ serialNumber: 'DT970048', operatorCode: '0001', idempotencyKey: 'x' });
+    const inv = reg.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'x' });
+    expect(usn.sequenceNumber).toBe(101);
+    expect(inv.invoiceNumber).toBe(5001);
+  });
+
+  it('reseeds the invoice counter forward-only', () => {
+    const reg = makeInitialized('DT970048', 0);
+    reg.initializeInvoiceDevice('DT970048', 0);
+    reg.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'a' }); // counter=1
+    expect(() => reg.initializeInvoiceDevice('DT970048', 0, { force: true })).toThrow(/lower/i);
+    reg.initializeInvoiceDevice('DT970048', 500, { force: true });
+    expect(reg.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'b' }).invoiceNumber).toBe(501);
+  });
+
+  it('persists the invoice counter across a restart', () => {
+    const reg1 = makeInitialized('DT970048', 0);
+    reg1.initializeInvoiceDevice('DT970048', 0);
+    reg1.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'a' });
+    const reg2 = make();
+    expect(reg2.isInvoiceInitialized('DT970048')).toBe(true);
+    expect(reg2.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'b' }).invoiceNumber).toBe(2);
+  });
+});

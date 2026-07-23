@@ -381,6 +381,67 @@ router.post('/:id/usn/init', (req, res) => {
   }
 });
 
+// GET /printers/:id/invoicenumber — read the invoice-number counter state.
+router.get('/:id/invoicenumber', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const info = service.printersInfo[req.params.id];
+  if (!info) return res.status(404).json({ error: 'Printer not found' });
+  try {
+    res.json(service.getInvoiceNumberInfo(info.SerialNumber || ''));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /printers/:id/invoicenumber — reserve the next raw invoice sequence.
+// Local, synchronous, offline-safe; idempotent by IdempotencyKey (Odoo order uid).
+router.post('/:id/invoicenumber', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const info = service.printersInfo[req.params.id];
+  if (!info) return res.status(404).json({ error: 'Printer not found' });
+  const { IdempotencyKey } = req.body || {};
+  try {
+    const result = service.reserveInvoiceNumber({
+      serialNumber: info.SerialNumber || '',
+      idempotencyKey: IdempotencyKey,
+    });
+    res.json({
+      InvoiceNumber: result.invoiceNumber,
+      SequenceNumber: result.sequenceNumber,
+      SerialNumber: info.SerialNumber || '',
+      Reused: result.reused,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /printers/:id/invoicenumber/init — initialize/reseed the invoice counter.
+// Destructive; gated behind USN_ADMIN_TOKEN when that env var is set.
+router.post('/:id/invoicenumber/init', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const info = service.printersInfo[req.params.id];
+  if (!info) return res.status(404).json({ error: 'Printer not found' });
+  const adminToken = process.env.USN_ADMIN_TOKEN;
+  if (adminToken && req.get('x-usn-admin-token') !== adminToken) {
+    return res.status(401).json({ error: 'Invalid or missing X-USN-Admin-Token' });
+  }
+  const { StartSequence, Force, AllowDecrease } = req.body || {};
+  try {
+    const result = service.initializeInvoiceNumber(
+      info.SerialNumber || '',
+      StartSequence != null ? StartSequence : 0,
+      { force: !!Force, allowDecrease: !!AllowDecrease }
+    );
+    res.json({ SerialNumber: result.serialNumber, Counter: result.counter });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // POST /printers/:id/reset
 router.post('/:id/reset', async (req, res) => {
   const service = getService(req);

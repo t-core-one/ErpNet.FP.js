@@ -289,6 +289,54 @@ describe('GET /printers/:id/usn', () => {
   });
 });
 
+// ── /printers/:id/invoicenumber ───────────────────────────────────────────
+
+describe('POST /printers/:id/invoicenumber', () => {
+  it('reserves the next invoice sequence via service.reserveInvoiceNumber', async () => {
+    const reserveInvoiceNumber = vi.fn().mockReturnValue({ invoiceNumber: 7, sequenceNumber: 7, reused: false });
+    const res = await request(createApp(makeService({ reserveInvoiceNumber })))
+      .post('/printers/DT970048/invoicenumber')
+      .send({ idempotencyKey: 'order-1' });
+    expect(res.status).toBe(200);
+    expect(res.body.invoiceNumber).toBe(7);
+    expect(res.body.reused).toBe(false);
+    expect(reserveInvoiceNumber).toHaveBeenCalledWith({ serialNumber: 'DT970048', idempotencyKey: 'order-1' });
+  });
+
+  it('returns 400 when invoice numbering is not initialized', async () => {
+    const reserveInvoiceNumber = vi.fn(() => { throw new Error('Invoice numbering is not initialized'); });
+    const res = await request(createApp(makeService({ reserveInvoiceNumber })))
+      .post('/printers/DT970048/invoicenumber')
+      .send({ idempotencyKey: 'order-1' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not initialized/i);
+  });
+});
+
+describe('GET /printers/:id/invoicenumber', () => {
+  it('returns the invoice counter state', async () => {
+    const getInvoiceNumberInfo = vi.fn().mockReturnValue({
+      serialNumber: 'DT970048', initialized: true, counter: 12, issuedKeys: 3,
+    });
+    const res = await request(createApp(makeService({ getInvoiceNumberInfo }))).get('/printers/DT970048/invoicenumber');
+    expect(res.status).toBe(200);
+    expect(res.body.initialized).toBe(true);
+    expect(res.body.counter).toBe(12);
+  });
+});
+
+describe('POST /printers/:id/invoicenumber/init', () => {
+  it('initializes/reseeds via service.initializeInvoiceNumber', async () => {
+    const initializeInvoiceNumber = vi.fn().mockReturnValue({ serialNumber: 'DT970048', counter: 5000 });
+    const res = await request(createApp(makeService({ initializeInvoiceNumber })))
+      .post('/printers/DT970048/invoicenumber/init')
+      .send({ startSequence: 5000, force: true });
+    expect(res.status).toBe(200);
+    expect(res.body.counter).toBe(5000);
+    expect(initializeInvoiceNumber).toHaveBeenCalledWith('DT970048', 5000, { force: true, allowDecrease: false });
+  });
+});
+
 // ── GET /printers/:id/status ──────────────────────────────────────────────
 
 describe('GET /printers/:id/status', () => {

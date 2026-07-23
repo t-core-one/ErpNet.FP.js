@@ -63,6 +63,29 @@ export class ServiceController {
     };
   }
 
+  // Reserve (idempotently) the next raw invoice sequence for a sale. Pure local
+  // bookkeeping — offline-safe, no device or backend I/O. Odoo formats it into
+  // the 10-digit invoice number and records it as account.move.name.
+  reserveInvoiceNumber({ serialNumber, idempotencyKey }) {
+    return this.usnRegister.reserveInvoiceNumber({ serialNumber, idempotencyKey });
+  }
+
+  // Initialize (fresh: 0) or reseed (recovery: recovered high-water mark) the
+  // invoice-number counter. Forward-only unless allowDecrease.
+  initializeInvoiceNumber(serialNumber, startSequence, { force = false, allowDecrease = false } = {}) {
+    return this.usnRegister.initializeInvoiceDevice(serialNumber, startSequence, { force, allowDecrease });
+  }
+
+  // Read-only view of a device's invoice-number counter (monitoring).
+  getInvoiceNumberInfo(serialNumber) {
+    return {
+      serialNumber,
+      initialized: this.usnRegister.isInvoiceInitialized(serialNumber),
+      counter: this.usnRegister.currentInvoice(serialNumber),
+      issuedKeys: this.usnRegister.invoiceIssuedCount(serialNumber),
+    };
+  }
+
   _ensureServerId() {
     if (this._configOptions.ServerId) return this._configOptions.ServerId;
     const id = uuidv4().replace(/-/g, '').substring(0, 22);
