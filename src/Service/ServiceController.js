@@ -106,24 +106,31 @@ export class ServiceController {
   async setup() {
     this.setupProvider();
 
+    // Additive: always connect explicitly-configured printers (HTTP/SIS devices
+    // are never auto-detected, so this is the only way they come up), THEN also
+    // scan for hardware when AutoDetect is on. A configured device (e.g. a SIS
+    // emulator) stays available alongside any auto-detected real printers.
+    await this._connectConfiguredPrinters();
     if (this._configOptions.AutoDetect) {
       await this.detect();
-    } else {
-      for (const [id, printerConfig] of Object.entries(this._configOptions.Printers || {})) {
-        try {
-          const printer = await this._provider.connect(printerConfig.Uri);
-          if (printer) {
-            this._printers[id] = printer;
-            this._printersInfo[id] = printer.info;
-          }
-        } catch (e) {
-          logger.error(`Failed to connect configured printer ${id}: ${e.message}`);
-        }
-      }
     }
 
     this._isReady = true;
     this._startTaskProcessor();
+  }
+
+  async _connectConfiguredPrinters() {
+    for (const [id, printerConfig] of Object.entries(this._configOptions.Printers || {})) {
+      try {
+        const printer = await this._provider.connect(printerConfig.Uri);
+        if (printer) {
+          this._printers[id] = printer;
+          this._printersInfo[id] = printer.info;
+        }
+      } catch (e) {
+        logger.error(`Failed to connect configured printer ${id}: ${e.message}`);
+      }
+    }
   }
 
   async detect() {
