@@ -168,6 +168,66 @@ A green **initialized** / red **NOT initialized** badge reflects the fail-closed
 state, and a **Refresh УНП state** button re-reads it live. The panel is backed by
 `GET /printers/:id/usn`, so it does no device or backend I/O and works offline.
 
+## New: Invoice and credit note (invoice on the fiscal receipt)
+
+The service can print a **fiscal invoice** (фактура) or **credit note** (кредитно
+известие) directly on the fiscal receipt, so the fiscal document *is* the legal
+invoice — no separate paper invoice needed.
+
+```text
+POST /printers/{printerId}/invoice      → print a fiscal invoice
+POST /printers/{printerId}/creditnote   → print a fiscal credit note (storno)
+```
+
+Both use the same **async task** pattern as `/receipt` (`?asyncTimeout=0&taskId=…`,
+then poll `taskinfo`), so retries are idempotent.
+
+**Device capability — check before offering it.** Invoice printing is only
+implemented by SIS-type devices. `GET /printers/{printerId}` reports the flags:
+
+```json
+{ "supportsInvoice": true, "supportsCreditNote": true,
+  "invoiceNumberAssignment": "device-assigned",
+  "creditNoteNumberAssignment": "device-assigned" }
+```
+
+On a device that doesn't support it the call returns error **`E413`** (not
+supported) — so gate the feature on `supportsInvoice` / `supportsCreditNote`.
+
+**Request body** — a normal receipt/reversal payload plus a `recipient`:
+
+```json
+POST /printers/{printerId}/invoice
+{
+  "uniqueSaleNumber": "DT970048-0001-0000042",
+  "recipient": {
+    "name": "ACME EOOD",
+    "identifier": "203945123",
+    "identifierType": "legal-registration",
+    "address": "ul. Vitosha 1",
+    "city": "Sofia",
+    "vatNumber": "BG203945123"
+  },
+  "items":    [ { "text": "Product", "quantity": 1, "unitPrice": 10.0, "taxGroup": 2 } ],
+  "payments": [ { "amount": 10.0, "paymentType": "card" } ]
+}
+```
+
+- `identifierType` ∈ `unspecified` · `legal-registration` · `national-id` ·
+  `foreigner-id` · `tax-number`. `name`, `identifier`, `identifierType` and
+  `address` are required (missing ones → **`E405`**).
+- **Number assignment:** when the flag is `device-assigned` (the default) the
+  device sets the invoice/credit-note number — do **not** send `number`
+  (sending one → **`E412`**). When it is `external-required`, send `number`.
+- A **credit note** additionally requires `originalInvoiceNumber` and carries the
+  reversal fields (`reason`, `receiptNumber`, `receiptDateTime`,
+  `fiscalMemorySerialNumber`) that point back at the original document.
+
+**In Odoo (`plana_pos_fiscal`):** enable *Invoice on fiscal receipt* on the POS
+config to print the invoice on the device for to-invoice orders with a customer —
+automatically skipped (falling back to a plain receipt) when the device lacks the
+capability. The standard Odoo invoice flow remains available when the toggle is off.
+
 ## Running
 
 ```bash
