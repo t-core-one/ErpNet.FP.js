@@ -148,6 +148,19 @@ describe('UsnRegister persistence & durability', () => {
     expect(r.sequenceNumber).toBe(3);
   });
 
+  it('reports the current counter and remembered-key count (monitoring)', () => {
+    const reg = makeInitialized('DT970048', 40);
+    expect(reg.current('DT970048')).toBe(40);
+    expect(reg.issuedCount('DT970048')).toBe(0);
+    reg.reserve({ serialNumber: 'DT970048', operatorCode: '0001', idempotencyKey: 'a' });
+    reg.reserve({ serialNumber: 'DT970048', operatorCode: '0001', idempotencyKey: 'b' });
+    expect(reg.current('DT970048')).toBe(42);
+    expect(reg.issuedCount('DT970048')).toBe(2);
+    // Unknown device: safe zeros, no throw.
+    expect(reg.current('ZZ999999')).toBe(0);
+    expect(reg.issuedCount('ZZ999999')).toBe(0);
+  });
+
   it('remembers issued keys across restart (idempotent after reboot)', () => {
     const reg1 = makeInitialized('DT970048', 0);
     const first = reg1.reserve({ serialNumber: 'DT970048', operatorCode: '0001', idempotencyKey: 'a' });

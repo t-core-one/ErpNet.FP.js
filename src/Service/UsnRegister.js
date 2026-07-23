@@ -320,4 +320,11 @@ export class UsnRegister {
     const dev = this._state.devices[serial];
     return dev ? dev.counter : 0;
   }
+
+  /** How many recently-issued idempotency keys are remembered for a device. */
+  issuedCount(serialNumber) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    const dev = this._state.devices[serial];
+    return dev && Array.isArray(dev.order) ? dev.order.length : 0;
+  }
 }

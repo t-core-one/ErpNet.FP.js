@@ -128,6 +128,8 @@ function showAvailablePrinters() {
                     '<input type="date" id="mreport-end-' + printerId + '" style="height:1.8em;padding:0.1em 0.3em;font-size:0.85em;" />' +
                     '&nbsp;<button id="btn-' + printerId + '-mrep" class="small primary printer-btn" data-printer="' + printerId + '" title="Prints periodical fiscal memory report for the selected date range" onclick="printMonthlyReport(\'' + printerId + '\')">M-Report</button>' +
                     '&nbsp;<label style="font-size:0.85em;"><input type="checkbox" id="mreport-detailed-' + printerId + '" />&nbsp;Detailed</label>' +
+                    '<div id="usn-state-' + printerId + '" class="usn-state" style="margin-top:0.6em;"><div class="spinner primary"></div>Loading УНП state…</div>' +
+                    '<button id="btn-' + printerId + '-usn" class="small printer-btn" data-printer="' + printerId + '" title="Refresh the Unique Sale Number (УНП) counter state for this device" onclick="showUsnState(\'' + printerId + '\')">Refresh УНП state</button>' +
                     '<br /><h4>Advanced properties for printer with serial number ' + printer.serialNumber + '... &#8964;</h4>' +
                     '<div class="card fluid">' +
                     printerConstantsContent +
@@ -138,6 +140,7 @@ function showAvailablePrinters() {
                     '</div>'+
                     '</div>'
                 this.append(section)
+                showUsnState(printerId)
             }
             var printersCount = Object.keys(data).length
             this.append('<p>Available ' + printersCount + ' printer(s).</p>')
@@ -145,6 +148,43 @@ function showAvailablePrinters() {
         error: function(xhr, type) {
             // wait more time
             setTimeout(function() { showAvailablePrinters() }, 3000);
+        }
+    })
+}
+
+// Read-only view of the device's УНП (Unique Sale Number) counter state, for
+// validation. The counter IS the high-water mark; the next sale uses counter+1.
+function showUsnState(printerId) {
+    var container = $('#usn-state-' + printerId)
+    if (!container.length) return
+    container.html('<div class="spinner primary"></div>Loading УНП state…')
+    $.ajax({
+        type: 'GET',
+        url: '/printers/' + encodeURIComponent(printerId) + '/usn',
+        dataType: 'json',
+        timeout: 15000,
+        success: function (s) {
+            var pad7 = function (n) { return ('0000000' + n).slice(-7) }
+            var counter = (s && s.counter != null) ? s.counter : 0
+            var initBadge = (s && s.initialized)
+                ? '<mark class="tag" style="background:#3fb950;color:#fff;">initialized</mark>'
+                : '<mark class="tag" style="background:#d1242f;color:#fff;">NOT initialized</mark>'
+            var next = (s && s.initialized)
+                ? ((s.serialNumber || '') + '-&hellip;-' + pad7(counter + 1))
+                : '&mdash; (initialize before selling)'
+            container.html(
+                '<div class="section dark" style="margin-top:0.4em;"><h5 style="margin:0;">УНП state&nbsp;' + initBadge + '</h5></div>' +
+                '<table class="device-info-table"><tbody>' +
+                '<tr><td class="device-info-label">Serial (ФУ ИН)</td><td><strong>' + ((s && s.serialNumber) || '&mdash;') + '</strong></td></tr>' +
+                '<tr><td class="device-info-label">Current sequence (high-water mark)</td><td><strong>' + counter + '</strong></td></tr>' +
+                '<tr><td class="device-info-label">Next УНП</td><td><strong>' + next + '</strong></td></tr>' +
+                '<tr><td class="device-info-label">Remembered sale keys</td><td>' + ((s && s.issuedKeys != null) ? s.issuedKeys : 0) + '</td></tr>' +
+                '<tr><td class="device-info-label">State file</td><td><code>' + ((s && s.statePath) || '&mdash;') + '</code></td></tr>' +
+                '</tbody></table>'
+            )
+        },
+        error: function () {
+            container.html('<mark class="tag" style="background:#d1242f;color:#fff;">Could not load УНП state</mark>')
         }
     })
 }

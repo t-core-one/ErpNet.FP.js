@@ -58,6 +58,7 @@ export class ServiceController {
       serialNumber,
       initialized: this.usnRegister.isDeviceInitialized(serialNumber),
       counter: this.usnRegister.current(serialNumber),
+      issuedKeys: this.usnRegister.issuedCount(serialNumber),
       statePath: this.usnRegister.statePath,
     };
   }
