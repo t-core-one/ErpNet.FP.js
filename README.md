@@ -115,7 +115,7 @@ starting number**:
 - A **corrupt or wrong-shaped** state file makes the service refuse to start.
 
 ```text
-GET  /printers/{printerId}/usn            → { initialized, counter, statePath }
+GET  /printers/{printerId}/usn            → { serialNumber, initialized, counter, issuedKeys, statePath }
 POST /printers/{printerId}/usn/init       → initialize / reseed the counter
 ```
 
@@ -149,6 +149,24 @@ The Odoo module `plana_pos_fiscal` automates steps 2–3 via the
 **Initialize / Recover УНП** button on the POS config (run it from a browser on
 the device's LAN). Only if a full drain is impossible should an operator add a
 margin — accepting a documented gap in preference to a duplicate.
+
+### Viewing УНП state in the admin page
+
+The admin page (the service root, e.g. `http://<host>:8001/`) shows a read-only
+**УНП state** panel under each detected printer — for validation without any
+tooling. Click **Detect Printers**; each device then lists:
+
+| Field | Meaning |
+| --- | --- |
+| Serial (ФУ ИН) | the device's individual number |
+| Current sequence (high-water mark) | the counter — the last issued sequence |
+| Next УНП | `SERIAL-…-<counter+1>` (the operator segment is filled per cashier at mint) |
+| Remembered sale keys | how many recent idempotency keys are cached |
+| State file | absolute path of the durable counter file |
+
+A green **initialized** / red **NOT initialized** badge reflects the fail-closed
+state, and a **Refresh УНП state** button re-reads it live. The panel is backed by
+`GET /printers/:id/usn`, so it does no device or backend I/O and works offline.
 
 ## Running
 
