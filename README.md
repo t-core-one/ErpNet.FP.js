@@ -268,6 +268,50 @@ WantedBy=multi-user.target
 sudo systemctl enable --now erpnet-fp
 ```
 
+## Testing without hardware — SIS device emulator
+
+`tools/sis-emulator.js` is a dependency-free HTTP server that speaks the SIS
+JSON-RPC protocol of the `bg.sis.json` driver. Point ErpNet.FP.js at it and the
+whole chain — **Odoo → ErpNet.FP.js → driver → emulator** — runs end-to-end with
+no fiscal hardware. SIS is used because it is plain JSON and is the only protocol
+that also supports invoices / credit notes (feature #6).
+
+1. **Start the emulator** (default port 8199):
+
+   ```bash
+   npm run emulator
+   # or: PORT=9100 SIS_EMU_FD=DT970048 SIS_EMU_FM=50170034 npm run emulator
+   ```
+
+2. **Point ErpNet.FP.js at it** — add a printer to `appsettings.json` (the URI
+   scheme is `bg.sis.json://<host>:<port>`):
+
+   ```json
+   "Printers": { "sis-emu": { "Uri": "bg.sis.json://localhost:8199" } }
+   ```
+
+   or, with the service running, use **Add printer…** on the admin page with the
+   same URI. Then `npm start` — the printer appears as `DT970048` and the УНП
+   state panel shows its counter.
+
+3. **Point Odoo at ErpNet.FP.js** — on the POS config set *Fiscal Print Server*
+   to the ErpNet.FP.js URL and *Fiscal Printer* to `DT970048`, click
+   **Initialize / Recover УНП**, then sell. Receipts, storno, cash in/out,
+   reports and invoices all flow to the emulator.
+
+The emulator maintains a fiscal-receipt counter, a cash drawer and the last QR
+code, and logs every request. A small control surface aids testing:
+
+```text
+GET  /__state                          → { receiptCounter, cashBalance, lastQr, fault }
+POST /__fault  {"prn":"PAPER END"}      → make getStatus/printReceipt fault (blocks payment)
+POST /__fault  {"clear":true}           → clear the fault
+```
+
+**Automated:** `npm test` includes `test/integration/sis-emulator.test.js`, which
+drives the real `bg.sis.json` driver + HTTP transport against the emulator
+(receipt, storno, cash, reports, invoice, credit note, fault injection).
+
 ## License
 
 Same as the original [ErpNet.FP](https://github.com/erpnet/ErpNet.FP) project.

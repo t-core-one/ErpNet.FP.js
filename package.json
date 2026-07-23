@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "emulator": "node tools/sis-emulator.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
