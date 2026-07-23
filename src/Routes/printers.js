@@ -338,6 +338,49 @@ router.post('/:id/usn', (req, res) => {
   }
 });
 
+// GET /printers/:id/usn — read the current counter / init state (monitoring).
+router.get('/:id/usn', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const info = service.printersInfo[req.params.id];
+  if (!info) return res.status(404).json({ error: 'Printer not found' });
+  const serialNumber = info.SerialNumber || '';
+  try {
+    res.json(service.getUsnInfo(serialNumber));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /printers/:id/usn/init — initialize (fresh, StartSequence 0) or reseed
+// (recovery, StartSequence = high-water mark recovered from Odoo). Destructive,
+// so it is gated behind USN_ADMIN_TOKEN when that env var is set.
+router.post('/:id/usn/init', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const printer = service.printers[req.params.id];
+  const info = service.printersInfo[req.params.id];
+  if (!printer || !info) return res.status(404).json({ error: 'Printer not found' });
+
+  const adminToken = process.env.USN_ADMIN_TOKEN;
+  if (adminToken && req.get('x-usn-admin-token') !== adminToken) {
+    return res.status(401).json({ error: 'Invalid or missing X-USN-Admin-Token' });
+  }
+
+  const serialNumber = info.SerialNumber || '';
+  const { StartSequence, Force, AllowDecrease } = req.body || {};
+  try {
+    const result = service.initializeUsn(
+      serialNumber,
+      StartSequence != null ? StartSequence : 0,
+      { force: !!Force, allowDecrease: !!AllowDecrease }
+    );
+    res.json({ SerialNumber: result.serialNumber, Counter: result.counter });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // POST /printers/:id/reset
 router.post('/:id/reset', async (req, res) => {
   const service = getService(req);

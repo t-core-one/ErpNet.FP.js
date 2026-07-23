@@ -243,6 +243,52 @@ describe('POST /printers/:id/usn', () => {
   });
 });
 
+// ── POST /printers/:id/usn/init ───────────────────────────────────────────
+
+describe('POST /printers/:id/usn/init', () => {
+  it('initializes/reseeds via service.initializeUsn and returns the counter', async () => {
+    const initializeUsn = vi.fn().mockReturnValue({ serialNumber: 'DT970048', counter: 500 });
+    const service = makeService({ initializeUsn });
+    const res = await request(createApp(service))
+      .post('/printers/DT970048/usn/init')
+      .send({ startSequence: 500, force: true });
+    expect(res.status).toBe(200);
+    expect(res.body.counter).toBe(500);
+    expect(initializeUsn).toHaveBeenCalledWith('DT970048', 500, { force: true, allowDecrease: false });
+  });
+
+  it('defaults startSequence to 0 for a fresh device', async () => {
+    const initializeUsn = vi.fn().mockReturnValue({ serialNumber: 'DT970048', counter: 0 });
+    await request(createApp(makeService({ initializeUsn })))
+      .post('/printers/DT970048/usn/init')
+      .send({});
+    expect(initializeUsn).toHaveBeenCalledWith('DT970048', 0, { force: false, allowDecrease: false });
+  });
+
+  it('returns 400 when the register rejects (e.g. forward-only violation)', async () => {
+    const initializeUsn = vi.fn(() => { throw new Error('Refusing to reseed to a LOWER counter'); });
+    const res = await request(createApp(makeService({ initializeUsn })))
+      .post('/printers/DT970048/usn/init')
+      .send({ startSequence: 1, force: true });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/lower/i);
+  });
+});
+
+// ── GET /printers/:id/usn ─────────────────────────────────────────────────
+
+describe('GET /printers/:id/usn', () => {
+  it('returns the init state and counter', async () => {
+    const getUsnInfo = vi.fn().mockReturnValue({
+      serialNumber: 'DT970048', initialized: true, counter: 42, statePath: '/x/usn-state.json',
+    });
+    const res = await request(createApp(makeService({ getUsnInfo }))).get('/printers/DT970048/usn');
+    expect(res.status).toBe(200);
+    expect(res.body.initialized).toBe(true);
+    expect(res.body.counter).toBe(42);
+  });
+});
+
 // ── GET /printers/:id/status ──────────────────────────────────────────────
 
 describe('GET /printers/:id/status', () => {

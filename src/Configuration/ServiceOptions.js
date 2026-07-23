@@ -36,6 +36,10 @@ export class ServiceOptions {
     this.ExcludePortList = [];
     this.DetectionTimeout = '30s';
     this.WebAccess = new WebAccessOptions();
+    // Absolute path for the durable УНП counter state. Empty => the register
+    // picks a default outside the app dir (USN_STATE_PATH env, else
+    // ~/.erpnet-fp/usn-state.json) so a redeploy cannot wipe it.
+    this.UsnStatePath = '';
   }
 
   remapPaymentTypes(deviceInfo, paymentTypeMappings) {

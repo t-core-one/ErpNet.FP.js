@@ -84,12 +84,69 @@ Response:
 ```
 
 The device serial is resolved from the printer itself. The per-device counter is
-**persisted to disk** (`usn-state.json`, written atomically) so numbers are never
-repeated across a service restart, and allocation is **idempotent** by
-`idempotencyKey` so retries and client reloads never burn or duplicate a number.
-Because it performs no fiscal-device or network I/O, a client (such as an Odoo POS
-running on an unreliable internet link) can reserve a УНП over the LAN even while
-the internet is down.
+**persisted durably** (write to temp → `fsync` → atomic rename → directory
+`fsync`, plus a `.bak` snapshot) so a crash or power loss can never repeat or
+lose a number, and allocation is **idempotent** by `idempotencyKey` so retries
+and client reloads never burn or duplicate a number. Because it performs no
+fiscal-device or network I/O, a client (such as an Odoo POS on an unreliable
+internet link) can reserve a УНП over the LAN even while the internet is down.
+
+### State location
+
+The counter lives **outside the app directory** so a `git pull`, container
+rebuild or `npm ci` cannot wipe it. Resolution order:
+
+1. `UsnStatePath` in the `ErpNet.FP` section of `appsettings.json`
+2. `USN_STATE_PATH` environment variable
+3. `~/.erpnet-fp/usn-state.json` (default)
+
+On systemd, prefer `StateDirectory=erpnet-fp` and point `USN_STATE_PATH` at
+`/var/lib/erpnet-fp/usn-state.json`.
+
+### Fail-closed safety & initialization
+
+A duplicate УНП is a hard compliance violation, so the register **never invents a
+starting number**:
+
+- A device must be **explicitly initialized before it can mint** — with `0` for a
+  brand-new device, or the recovered high-water mark after a state loss.
+- A **missing** state file (deleted / reformatted / redeployed) leaves devices
+  *uninitialized*; minting is refused (not silently restarted at 1).
+- A **corrupt or wrong-shaped** state file makes the service refuse to start.
+
+```text
+GET  /printers/{printerId}/usn            → { initialized, counter, statePath }
+POST /printers/{printerId}/usn/init       → initialize / reseed the counter
+```
+
+`/usn/init` body: `{ "startSequence": <int>, "force": <bool>, "allowDecrease": <bool> }`.
+It is **forward-only** (refuses to lower the counter unless `allowDecrease`) and,
+when the `USN_ADMIN_TOKEN` env var is set, requires a matching
+`X-USN-Admin-Token` header.
+
+### Recovery after a state loss
+
+The УНП recorded in Odoo (`pos.order.fiscal_usn`) is the audited system of record
+and the recovery source of truth. **Odoo's max is a floor, not the exact
+high-water mark** — abandoned carts and offline-queued orders burn numbers that
+never reach Odoo — so recovery must bias **high**:
+
+1. Stop selling on the affected device; let all terminals sync their offline
+   queues so recent numbers reach Odoo.
+2. Measure the per-device high-water mark:
+
+   ```sql
+   SELECT MAX(CAST(split_part(fiscal_usn, '-', 3) AS integer))
+   FROM pos_order WHERE fiscal_usn LIKE 'DT970048-%';
+   ```
+
+3. Reseed forward: `POST /usn/init { startSequence: max + margin, force: true }`
+   with `margin ≥ peak_daily_sales × max_offline_days` (min 1000). The gap is
+   legal under Н-18; duplicates are not.
+
+The Odoo module `plana_pos_fiscal` automates steps 2–3 via the
+**Initialize / Recover УНП** button on the POS config (run it from a browser on
+the device's LAN).
 
 ## Running
 

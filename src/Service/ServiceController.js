@@ -46,6 +46,22 @@ export class ServiceController {
     return this.usnRegister.reserve({ serialNumber, operatorCode, idempotencyKey });
   }
 
+  // Initialize (fresh: startSequence 0) or reseed (recovery: recovered
+  // high-water mark) a device's УНП counter. Forward-only unless allowDecrease.
+  initializeUsn(serialNumber, startSequence, { force = false, allowDecrease = false } = {}) {
+    return this.usnRegister.initializeDevice(serialNumber, startSequence, { force, allowDecrease });
+  }
+
+  // Read-only view of a device's counter/initialization state (monitoring).
+  getUsnInfo(serialNumber) {
+    return {
+      serialNumber,
+      initialized: this.usnRegister.isDeviceInitialized(serialNumber),
+      counter: this.usnRegister.current(serialNumber),
+      statePath: this.usnRegister.statePath,
+    };
+  }
+
   _ensureServerId() {
     if (this._configOptions.ServerId) return this._configOptions.ServerId;
     const id = uuidv4().replace(/-/g, '').substring(0, 22);
