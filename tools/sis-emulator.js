@@ -41,6 +41,9 @@ export function createSisEmulator(options = {}) {
     lastQr: '',
     fault: null,                                     // e.g. { prn: 'PAPER END' }
     log: options.log !== false,
+    // Optional: e-mail each rendered receipt instead of a physical printout.
+    // { to, from?, host?, port?, secure?, user?, pass?, subjectPrefix? }
+    email: options.email || null,
   };
 
   const log = (...a) => { if (state.log) console.log('[sis-emu]', ...a); };
@@ -68,6 +71,97 @@ export function createSisEmulator(options = {}) {
     for (const p of payments || []) t += Number(p.amount || 0) - Number(p.change || 0);
     return round2(t);
   };
+
+  const money = (n) => Number(n || 0).toFixed(2);
+  const mediumName = (m) => (Number(m) === 0 ? 'В брой / Cash' : `Плащане / Payment (medium ${m})`);
+
+  /**
+   * Render the received printReceipt params into a plain-text receipt — what a
+   * real device would put on paper — for the e-mail body (or console).
+   */
+  function renderReceiptText(prms, meta) {
+    const begin = prms.beginFiscalReceiptInput || {};
+    const kind = meta.isStorno
+      ? (meta.isInvoice ? 'КРЕДИТНО ИЗВЕСТИЕ / CREDIT NOTE' : 'СТОРНО / REVERSAL RECEIPT')
+      : (meta.isInvoice ? 'ФАКТУРА / INVOICE' : 'ФИСКАЛЕН БОН / FISCAL RECEIPT');
+    const L = [];
+    const rule = '----------------------------------------';
+    L.push('========================================');
+    L.push(`  ${kind}`);
+    L.push('========================================');
+    L.push(`ФУ / Device:  ${state.fdNumber}    ФП / FM: ${state.fmNumber}`);
+    L.push(`Бон № / No:   ${meta.receiptNumber}`);
+    if (begin.usn) L.push(`УНП / USN:    ${begin.usn}`);
+    const op = begin.operatorName || begin.operatorNumber;
+    if (op != null) L.push(`Оператор:     ${op}`);
+    L.push(`Дата / Date:  ${meta.date.toISOString().slice(0, 19).replace('T', ' ')}`);
+    L.push(rule);
+    for (const f of prms.freeprint || []) L.push(`  ${f.text || ''}`);
+    for (const it of prms.receiptItems || []) {
+      const qty = Number(it.quantity || 1);
+      const price = Number(it.price || 0);
+      L.push(it.description || '');
+      L.push(`    ${qty} x ${money(price)} = ${money(round2(qty * price))}   [ДДС гр. ${it.enumVatCategory}]`);
+      for (const tl of it.textlines || []) L.push(`      ${tl.text || ''}`);
+    }
+    for (const s of prms.subtotal || []) {
+      L.push(`  ${s.subtotalText || 'Отстъпка/Надбавка'}: ${money(s.subtotalSurchargeAmount)}`);
+    }
+    L.push(rule);
+    for (const p of prms.receiptPayments || []) {
+      L.push(`${mediumName(p.medium)}:  ${money(p.amount)}`);
+      if (p.change) L.push(`Ресто / Change:  ${money(p.change)}`);
+    }
+    L.push(`ОБЩО / TOTAL:  ${money(meta.total)}`);
+    L.push(rule);
+    if (prms.invoiceData) {
+      const inv = prms.invoiceData;
+      L.push('Получател / Recipient:');
+      L.push(`  Фактура № / Invoice No: ${inv.invNumber || ''}`);
+      if (inv.recipientName) L.push(`  ${inv.recipientName}`);
+      if (inv.identNumber) L.push(`  ЕИК/ID: ${inv.identNumber}`);
+      if (inv.vatIdentNumber) L.push(`  ДДС № / VAT: ${inv.vatIdentNumber}`);
+      L.push(`  ${[inv.recipientAddress, inv.city].filter(Boolean).join(', ')}`);
+      L.push(rule);
+    }
+    if (prms.stornoInput) {
+      const st = prms.stornoInput;
+      L.push('Сторниран документ / Reversal of:');
+      L.push(`  Бон № / Receipt: ${st.receiptNumber || ''}    ФП / FM: ${st.fiscMemNumber || ''}`);
+      L.push(rule);
+    }
+    for (const f of prms.textAfterPayment || []) L.push(`  ${f.text || ''}`);
+    L.push(`QR: ${meta.qr}`);
+    L.push('========================================');
+    return L.join('\n');
+  }
+
+  let _transport = null;
+  /** E-mail the rendered receipt text (fire-and-forget; failures only log). */
+  async function sendReceiptEmail(subject, text) {
+    const e = state.email;
+    if (!e || !e.to) return;
+    try {
+      if (!_transport) {
+        const nodemailer = await import('nodemailer');
+        _transport = nodemailer.createTransport({
+          host: e.host || 'localhost',
+          port: e.port || 587,
+          secure: !!e.secure,
+          auth: e.user ? { user: e.user, pass: e.pass } : undefined,
+        });
+      }
+      await _transport.sendMail({
+        from: e.from || e.user || 'sis-emu@localhost',
+        to: e.to,
+        subject: `${e.subjectPrefix || '[sis-emu]'} ${subject}`,
+        text,
+      });
+      log(`emailed receipt to ${e.to}: ${subject}`);
+    } catch (err) {
+      log(`WARN e-mail failed (${err && err.message}); receipt text follows:\n${text}`);
+    }
+  }
 
   function handle(req) {
     const { id, method, params } = req;
@@ -126,6 +220,18 @@ export function createSisEmulator(options = {}) {
 
         const usn = prms.beginFiscalReceiptInput && prms.beginFiscalReceiptInput.usn;
         log(`printReceipt #${state.receiptCounter} ${isStorno ? 'STORNO ' : ''}${isInvoice ? 'INVOICE ' : ''}usn=${usn} total=${total.toFixed(2)}`);
+
+        // "Print" the receipt as text: e-mail it when SMTP is configured,
+        // otherwise echo it to the console.
+        const receiptText = renderReceiptText(prms, {
+          isStorno, isInvoice, total, receiptNumber: state.receiptCounter, qr, date: d,
+        });
+        const subject = `${isStorno ? 'Сторно' : isInvoice ? 'Фактура' : 'Фискален бон'} #${state.receiptCounter}${usn ? ' · УНП ' + usn : ''}`;
+        if (state.email && state.email.to) {
+          sendReceiptEmail(subject, receiptText); // fire-and-forget, never blocks the response
+        } else {
+          log(`receipt (no e-mail configured):\n${receiptText}`);
+        }
 
         return {
           ...baseOk(id),
@@ -220,11 +326,29 @@ if (isMain) {
     fmNumber: process.env.SIS_EMU_FM,
     model: process.env.SIS_EMU_MODEL,
     startCash: process.env.SIS_EMU_CASH ? Number(process.env.SIS_EMU_CASH) : 0,
+    // Set SIS_EMU_EMAIL_TO to e-mail every rendered receipt (requires nodemailer
+    // and an SMTP server); otherwise the receipt text is printed to the console.
+    email: process.env.SIS_EMU_EMAIL_TO
+      ? {
+          to: process.env.SIS_EMU_EMAIL_TO,
+          from: process.env.SIS_EMU_EMAIL_FROM,
+          host: process.env.SIS_EMU_SMTP_HOST,
+          port: process.env.SIS_EMU_SMTP_PORT ? Number(process.env.SIS_EMU_SMTP_PORT) : undefined,
+          secure: process.env.SIS_EMU_SMTP_SECURE === 'true',
+          user: process.env.SIS_EMU_SMTP_USER,
+          pass: process.env.SIS_EMU_SMTP_PASS,
+        }
+      : null,
   });
   emu.listen(port).then((p) => {
     console.log(`[sis-emu] SIS fiscal-device emulator listening on http://localhost:${p}`);
     console.log(`[sis-emu] Configure ErpNet.FP.js printer URI: bg.sis.json://localhost:${p}`);
     console.log(`[sis-emu] FDNumber=${emu.state.fdNumber} FMNumber=${emu.state.fmNumber} model=${emu.state.model}`);
+    console.log(
+      emu.state.email && emu.state.email.to
+        ? `[sis-emu] Receipts e-mailed to ${emu.state.email.to} via ${emu.state.email.host || 'localhost'}:${emu.state.email.port || 587}`
+        : '[sis-emu] Receipts printed to console (set SIS_EMU_EMAIL_TO + SIS_EMU_SMTP_* to e-mail them)'
+    );
     console.log('[sis-emu] Control: GET /__state · POST /__fault {"prn":"PAPER END"} · POST /__fault {"clear":true}');
   });
 }
