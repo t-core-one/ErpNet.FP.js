@@ -15,6 +15,8 @@ import { BgIncotexIslFiscalPrinterDriver } from './Drivers/BgIncotex/BgIncotexIs
 import { BgIslIcpFiscalPrinterDriver } from './Drivers/BgIsl/BgIslIcpFiscalPrinter.js';
 import { BgTremolZfpFiscalPrinterDriver } from './Drivers/BgTremol/BgTremolZfpFiscalPrinter.js';
 import { BgTremolZfpV2FiscalPrinterDriver } from './Drivers/BgTremol/BgTremolZfpV2FiscalPrinter.js';
+import { BgSisJsonFiscalPrinterDriver } from './Drivers/BgSis/BgSisJsonFiscalPrinterDriver.js';
+import { HttpTransport } from './Transports/HttpTransport.js';
 
 const APP_SETTINGS_FILE = path.join(process.cwd(), 'appsettings.json');
 
@@ -49,6 +51,7 @@ export class ServiceSingleton extends ServiceController {
   setupProvider() {
     const comTransport = new ComTransport();
     const tcpTransport = new TcpTransport();
+    const httpTransport = new HttpTransport();
 
     const datecsXIsl  = new BgDatecsXIslFiscalPrinterDriver();
     const datecsPIsl  = new BgDatecsPIslFiscalPrinterDriver();
@@ -59,6 +62,7 @@ export class ServiceSingleton extends ServiceController {
     const islIcp      = new BgIslIcpFiscalPrinterDriver();
     const tremolZfp   = new BgTremolZfpFiscalPrinterDriver();
     const tremolV2Zfp = new BgTremolZfpV2FiscalPrinterDriver();
+    const sisJson     = new BgSisJsonFiscalPrinterDriver();
 
     this._provider = new Provider(this._configOptions)
       .register(datecsXIsl,  comTransport)
@@ -78,7 +82,8 @@ export class ServiceSingleton extends ServiceController {
       .register(tremolZfp,   comTransport)
       .register(tremolZfp,   tcpTransport)
       .register(tremolV2Zfp, comTransport)
-      .register(tremolV2Zfp, tcpTransport);
+      .register(tremolV2Zfp, tcpTransport)
+      .register(sisJson,     httpTransport);
   }
 
   _writeOptions() {

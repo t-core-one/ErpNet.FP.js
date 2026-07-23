@@ -206,6 +206,43 @@ describe('POST /printers/:id/duplicate', () => {
   });
 });
 
+// ── POST /printers/:id/usn ────────────────────────────────────────────────
+
+describe('POST /printers/:id/usn', () => {
+  it('returns 404 for unknown printer', async () => {
+    const res = await request(createApp(makeService()))
+      .post('/printers/UNKNOWN/usn')
+      .send({ operatorCode: '0001', idempotencyKey: 'k1' });
+    expect(res.status).toBe(404);
+  });
+
+  it('reserves a УНП via service.reserveUsn and camelCases the response', async () => {
+    const reserveUsn = vi.fn().mockReturnValue({
+      uniqueSaleNumber: 'DT970048-0001-0000001', sequenceNumber: 1, reused: false,
+    });
+    const service = makeService({ reserveUsn });
+    const res = await request(createApp(service))
+      .post('/printers/DT970048/usn')
+      .send({ operatorCode: '0001', idempotencyKey: 'order-42' });
+    expect(res.status).toBe(200);
+    expect(res.body.uniqueSaleNumber).toBe('DT970048-0001-0000001');
+    expect(res.body.reused).toBe(false);
+    // Serial is resolved from the device, operator+key come from the (PascalCased) body.
+    expect(reserveUsn).toHaveBeenCalledWith({
+      serialNumber: 'DT970048', operatorCode: '0001', idempotencyKey: 'order-42',
+    });
+  });
+
+  it('returns 400 when the register rejects the request', async () => {
+    const reserveUsn = vi.fn(() => { throw new Error('Invalid operator code'); });
+    const res = await request(createApp(makeService({ reserveUsn })))
+      .post('/printers/DT970048/usn')
+      .send({ operatorCode: 'BAD', idempotencyKey: 'k1' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/operator/i);
+  });
+});
+
 // ── GET /printers/:id/status ──────────────────────────────────────────────
 
 describe('GET /printers/:id/status', () => {

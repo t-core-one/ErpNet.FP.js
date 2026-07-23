@@ -12,6 +12,11 @@ export class DeviceInfo {
     this.TaxIdentificationNumber = '';
     this.SupportedPaymentTypes = [];
     this.SupportsSubTotalAmountModifiers = false;
+    this.SubTotalAmountModifiersRequireTaxGroup = false;
+    this.SupportsInvoice = false;
+    this.SupportsCreditNote = false;
+    this.InvoiceNumberAssignment = 'device-assigned';
+    this.CreditNoteNumberAssignment = 'device-assigned';
     this.SupportPaymentTerminal = false;
     this.UsePaymentTerminal = false;
   }

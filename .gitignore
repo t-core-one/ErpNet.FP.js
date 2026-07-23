@@ -1,3 +1,7 @@
+# Runtime state
+usn-state.json
+usn-state.json.tmp
+
 # Logs
 logs
 *.log

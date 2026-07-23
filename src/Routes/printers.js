@@ -269,6 +269,75 @@ router.post('/:id/duplicate', async (req, res) => {
   }
 });
 
+// POST /printers/:id/invoice
+router.post('/:id/invoice', async (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const printer = service.printers[req.params.id];
+  if (!printer) return res.status(404).json({ error: 'Printer not found' });
+  logger.debug(`invoice body: ${JSON.stringify(req.body)?.slice(0, 600)}`);
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
+  const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
+  try {
+    const result = await service.runAsync(new PrintJob({
+      printer, action: PrintJobAction.Invoice, document: req.body,
+      asyncTimeout, timeout, taskId: req.query.taskId,
+    }));
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /printers/:id/creditnote
+router.post('/:id/creditnote', async (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const printer = service.printers[req.params.id];
+  if (!printer) return res.status(404).json({ error: 'Printer not found' });
+  logger.debug(`creditnote body: ${JSON.stringify(req.body)?.slice(0, 600)}`);
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
+  const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
+  try {
+    const result = await service.runAsync(new PrintJob({
+      printer, action: PrintJobAction.CreditNote, document: req.body,
+      asyncTimeout, timeout, taskId: req.query.taskId,
+    }));
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /printers/:id/usn
+// Reserve a Unique Sale Number (УНП) for a sale. Local, synchronous, offline-safe:
+// no fiscal-device I/O and no dependency on the Odoo backend. Idempotent by
+// IdempotencyKey (the Odoo order uid) so retries reuse the same number.
+router.post('/:id/usn', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const printer = service.printers[req.params.id];
+  const info = service.printersInfo[req.params.id];
+  if (!printer || !info) return res.status(404).json({ error: 'Printer not found' });
+  const serialNumber = (info.SerialNumber || (printer.info && printer.info.SerialNumber) || '');
+  const { OperatorCode, IdempotencyKey } = req.body || {};
+  try {
+    const result = service.reserveUsn({
+      serialNumber,
+      operatorCode: OperatorCode,
+      idempotencyKey: IdempotencyKey,
+    });
+    res.json({
+      UniqueSaleNumber: result.uniqueSaleNumber,
+      SequenceNumber: result.sequenceNumber,
+      SerialNumber: serialNumber,
+      Reused: result.reused,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // POST /printers/:id/reset
 router.post('/:id/reset', async (req, res) => {
   const service = getService(req);

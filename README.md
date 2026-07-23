@@ -47,6 +47,50 @@ Request body (all fields optional):
 
 The short report (`detailed: false`) prints a summary of daily Z-report totals for the requested period. The full report (`detailed: true`) prints every individual receipt record from fiscal memory. Both reports are printed directly on the fiscal printer's paper tape.
 
+## New: Unique Sale Number (УНП) reservation
+
+This port adds `POST /printers/:id/usn` — an endpoint not present in the
+original server. It lets the print server act as the authoritative, **offline-safe**
+source of Unique Sale Numbers (УНП) for a fiscal device, per Наредба № Н-18/2006,
+Приложение №29 т.9.
+
+```text
+POST /printers/{printerId}/usn
+```
+
+Request body:
+
+```json
+{
+  "operatorCode": "0001",
+  "idempotencyKey": "00042-001-0007"
+}
+```
+
+| Field            | Description                                                       |
+| ---------------- | ----------------------------------------------------------------- |
+| `operatorCode`   | 4-char operator code embedded in the USN (Odoo `res.users.ref`).  |
+| `idempotencyKey` | Stable per-sale key (Odoo POS order `uid`); retries reuse number. |
+
+Response:
+
+```json
+{
+  "uniqueSaleNumber": "DT970048-0001-0000001",
+  "sequenceNumber": 1,
+  "serialNumber": "DT970048",
+  "reused": false
+}
+```
+
+The device serial is resolved from the printer itself. The per-device counter is
+**persisted to disk** (`usn-state.json`, written atomically) so numbers are never
+repeated across a service restart, and allocation is **idempotent** by
+`idempotencyKey` so retries and client reloads never burn or duplicate a number.
+Because it performs no fiscal-device or network I/O, a client (such as an Odoo POS
+running on an unreliable internet link) can reserve a УНП over the LAN even while
+the internet is down.
+
 ## Running
 
 ```bash

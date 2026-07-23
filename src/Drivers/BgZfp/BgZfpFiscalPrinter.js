@@ -253,8 +253,9 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     if (dept > 0) {
       const fb = new FrameBuilder();
       fb.addString(paddedText);
-      fb.addString(`\t${price}\t${qty}\t`);
+      // DepNum is one raw byte = dept + 0x80 (Dep01=0x81 ... Dep19=0x93)
       fb.addByte(0x80 + dept);
+      fb.addString(`\t${price}\t${qty}`);
       await this._sendCommand(CMD.SellCorrectionDepartment, fb.build());
     } else {
       const fb = new FrameBuilder();

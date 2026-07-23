@@ -9,6 +9,7 @@ import { Provider } from '../Provider/Provider.js';
 import { TaskStatus } from './TaskStatus.js';
 import { DEFAULT_TIMEOUT } from './PrintJob.js';
 import { ServiceOptions } from '../Configuration/ServiceOptions.js';
+import { UsnRegister } from './UsnRegister.js';
 
 export class ServiceController {
   constructor(configOptions) {
@@ -20,6 +21,7 @@ export class ServiceController {
     this._isReady = false;
     this._isProcessing = false;
     this._provider = null;
+    this._usnRegister = null;
 
     this.serverId = this._ensureServerId();
   }
@@ -28,6 +30,21 @@ export class ServiceController {
   get printersInfo() { return this._printersInfo; }
   get isReady() { return this._isReady; }
   get configOptions() { return this._configOptions; }
+
+  // Lazily created so services that never reserve a УНП do no disk I/O.
+  get usnRegister() {
+    if (!this._usnRegister) {
+      this._usnRegister = new UsnRegister({ statePath: this._configOptions.UsnStatePath });
+    }
+    return this._usnRegister;
+  }
+
+  // Allocate (or idempotently re-return) a УНП for a sale. Pure local
+  // bookkeeping — no hardware I/O — so it succeeds even when the fiscal
+  // device is busy and, crucially, when the internet is down.
+  reserveUsn({ serialNumber, operatorCode, idempotencyKey }) {
+    return this.usnRegister.reserve({ serialNumber, operatorCode, idempotencyKey });
+  }
 
   _ensureServerId() {
     if (this._configOptions.ServerId) return this._configOptions.ServerId;

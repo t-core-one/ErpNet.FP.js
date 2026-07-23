@@ -4,6 +4,9 @@ import { DeviceStatusWithReceiptInfo } from '../Core/DeviceStatus.js';
 import { PaymentType } from '../Core/Payment.js';
 import { ItemType, PriceModifierType } from '../Core/Item.js';
 import { ReversalReason } from '../Core/ReversalReceipt.js';
+import { RecipientIdentifierType } from '../Core/Recipient.js';
+import { NumberAssignment } from '../Core/NumberAssignment.js';
+import { InvoiceInfo } from '../Core/InvoiceInfo.js';
 
 const USN_REGEX = /^[A-Z]{2}[0-9]{6}-[A-Z0-9]{4}-[0-9]{7}$/;
 
@@ -88,6 +91,42 @@ export class BgFiscalPrinter {
     return status;
   }
 
+  validateInvoiceDocument(status, document, numberAssignment, documentName) {
+    const recipient = document.Recipient;
+    if (!recipient) {
+      status.addError('E405', `${documentName} requires a "recipient"`);
+      return status;
+    }
+    if (!recipient.Name)
+      status.addError('E405', `${documentName} recipient requires a "name"`);
+    if (!recipient.Identifier)
+      status.addError('E405', `${documentName} recipient requires an "identifier"`);
+    if (!recipient.IdentifierType || recipient.IdentifierType === RecipientIdentifierType.Unspecified)
+      status.addError('E405', `${documentName} recipient requires an "identifierType"`);
+    if (!recipient.Address)
+      status.addError('E405', `${documentName} recipient requires an "address"`);
+    if (!document.Number && numberAssignment === NumberAssignment.ExternalRequired)
+      status.addError('E405', `${documentName} number is required by this device`);
+    if (document.Number && numberAssignment === NumberAssignment.DeviceAssigned)
+      status.addError('E412', `${documentName} external number not supported by this device`);
+    return status;
+  }
+
+  validateInvoice(invoice) {
+    // Accumulate all field errors into one status (matches .NET ValidateInvoiceCore).
+    // validateInvoiceDocument mutates and returns the same status object.
+    const status = this.validateReceipt(invoice);
+    return this.validateInvoiceDocument(status, invoice, this.info.InvoiceNumberAssignment, 'invoice');
+  }
+
+  validateCreditNote(creditNote) {
+    const status = this.validateReversalReceipt(creditNote);
+    this.validateInvoiceDocument(status, creditNote, this.info.CreditNoteNumberAssignment, 'credit note');
+    if (!creditNote.OriginalInvoiceNumber)
+      status.addError('E405', 'Credit note requires an "originalInvoiceNumber"');
+    return status;
+  }
+
   validateTransferAmount(transferAmount) {
     const status = new DeviceStatusWithReceiptInfo();
     if (!transferAmount) {
@@ -114,4 +153,19 @@ export class BgFiscalPrinter {
   printDuplicate(credentials) { throw new Error('printDuplicate must be implemented'); }
   rawRequest(requestFrame) { throw new Error('rawRequest must be implemented'); }
   reset(credentials) { throw new Error('reset must be implemented'); }
+
+  // Base stubs: devices that do not support invoicing return E413.
+  // The SIS driver overrides these with real logic; validateInvoice /
+  // validateCreditNote above are the reusable field validators it calls.
+  printInvoice(invoice) {
+    const status = new DeviceStatusWithReceiptInfo();
+    status.addError('E413', 'Invoice printing is not supported by this device');
+    return { receiptInfo: new InvoiceInfo(), deviceStatus: status };
+  }
+
+  printCreditNote(creditNote) {
+    const status = new DeviceStatusWithReceiptInfo();
+    status.addError('E413', 'Credit note printing is not supported by this device');
+    return { receiptInfo: new InvoiceInfo(), deviceStatus: status };
+  }
 }
