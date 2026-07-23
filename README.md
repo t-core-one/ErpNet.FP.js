@@ -124,6 +124,17 @@ It is **forward-only** (refuses to lower the counter unless `allowDecrease`) and
 when the `USN_ADMIN_TOKEN` env var is set, requires a matching
 `X-USN-Admin-Token` header.
 
+> **Limitation — `USN_ADMIN_TOKEN` vs. the Odoo POS init dialog.** The
+> *Initialize / Recover УНП* dialog in the `plana_pos_fiscal` Odoo module calls
+> these `/init` endpoints straight from the browser and does **not** send the
+> `X-USN-Admin-Token` header (and the CORS allow-list does not permit it), so a
+> print server started with `USN_ADMIN_TOKEN` set will reject the dialog with
+> HTTP 401. It fails safe — no counter is changed — but the dialog then cannot
+> initialize or recover a counter. If you rely on that dialog, **leave
+> `USN_ADMIN_TOKEN` unset** and protect the `/init` endpoints by keeping the
+> print server on a trusted LAN reachable only by the POS/Odoo hosts. Normal УНП
+> minting (`POST /usn`) is never gated by the token — only `/init` is.
+
 ### Recovery after a state loss
 
 The УНП recorded in Odoo (`pos.order.fiscal_usn`) is the audited system of record
