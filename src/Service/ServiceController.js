@@ -11,6 +11,12 @@ import { DEFAULT_TIMEOUT } from './PrintJob.js';
 import { ServiceOptions } from '../Configuration/ServiceOptions.js';
 import { UsnRegister } from './UsnRegister.js';
 
+// How long a finished task's result is retained so a client that lost the poll
+// response can re-issue the SAME taskId and rejoin it instead of re-printing.
+// Idempotency depends on this: deleting on first read would let a lost-response
+// retry re-run the job and print a duplicate fiscal document.
+const TASK_RESULT_TTL_MS = 10 * 60 * 1000;
+
 export class ServiceController {
   constructor(configOptions) {
     this._configOptions = configOptions || new ServiceOptions();
@@ -141,13 +147,23 @@ export class ServiceController {
   }
 
   getTaskInfo(taskId) {
+    this._sweepExpiredTasks();
     const task = this._tasks[taskId];
     if (!task) return { taskStatus: TaskStatus.Unknown, result: null };
-    const info = { taskStatus: task.status, result: task.result };
-    if (task.status === TaskStatus.Finished) {
-      delete this._tasks[taskId];
+    // Do NOT delete a finished task on read: a retry that lost the response must
+    // be able to re-issue the same taskId and get this cached result rather than
+    // re-run the job (which would print a duplicate). Finished tasks are swept
+    // after TASK_RESULT_TTL_MS.
+    return { taskStatus: task.status, result: task.result };
+  }
+
+  _sweepExpiredTasks() {
+    const now = Date.now();
+    for (const [id, t] of Object.entries(this._tasks)) {
+      if (t.status === TaskStatus.Finished && t.finishedAt && now - t.finishedAt > TASK_RESULT_TTL_MS) {
+        delete this._tasks[id];
+      }
     }
-    return info;
   }
 
   async runAsync(printJob) {
@@ -196,11 +212,11 @@ export class ServiceController {
       task.status = TaskStatus.Running;
       try {
         task.result = await job.run();
-        task.status = TaskStatus.Finished;
       } catch (e) {
         task.result = { error: e.message };
-        task.status = TaskStatus.Finished;
       }
+      task.status = TaskStatus.Finished;
+      task.finishedAt = Date.now();
     }
 
     this._isProcessing = false;
