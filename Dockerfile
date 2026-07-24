@@ -5,8 +5,12 @@ FROM node:20-bookworm
 LABEL maintainer="TeamCore, Ltd. <info@plana.solutions>"
 
 # Tools used by the entrypoint (provision/register/cert-fetch, LAN-IP detection).
+# `udev` provides udevadm, which the `serialport` module shells out to when
+# enumerating serial ports; without it SerialPort.list() throws and no USB
+# fiscal printer is ever auto-detected. (udevadm queries /run/udev + /sys — both
+# available in the container — and does not need the udev daemon running.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl openssl python3 iproute2 ca-certificates \
+      curl openssl python3 iproute2 ca-certificates udev \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
