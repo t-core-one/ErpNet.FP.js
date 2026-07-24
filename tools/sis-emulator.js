@@ -22,7 +22,7 @@ import { fileURLToPath } from 'url';
 const KNOWN_METHODS = new Set([
   'getMfcInfo', 'getStatus', 'setTime', 'getCashBalance', 'cashHandling',
   'printReceipt', 'getData', 'printZReport', 'printXReport', 'printDuplicate',
-  'getError',
+  'printFiscalMemoryReport', 'getError',
 ]);
 
 const p2 = (n) => String(n).padStart(2, '0');
@@ -229,14 +229,20 @@ export function createSisEmulator(options = {}) {
 
       case 'printZReport':
       case 'printXReport':
-      case 'printDuplicate': {
+      case 'printDuplicate':
+      case 'printFiscalMemoryReport': {
         const kinds = {
           printZReport: 'Z-ОТЧЕТ / Z REPORT',
           printXReport: 'X-ОТЧЕТ / X REPORT',
           printDuplicate: 'ДУБЛИКАТ / DUPLICATE',
+          printFiscalMemoryReport: 'ОТЧЕТ ФИСКАЛНА ПАМЕТ / FISCAL MEMORY REPORT',
         };
+        let kind = kinds[method];
+        if (method === 'printFiscalMemoryReport' && params && (params.startDate || params.endDate)) {
+          kind += ` (${params.startDate || '…'} — ${params.endDate || '…'})`;
+        }
         log(method);
-        emitDoc(kinds[method], renderReportText(kinds[method], new Date()));
+        emitDoc(kind, renderReportText(kind, new Date()));
         return baseOk(id);
       }
 

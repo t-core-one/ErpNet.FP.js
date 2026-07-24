@@ -713,6 +713,19 @@ export class BgSisJsonFiscalPrinter extends BgFiscalPrinter {
     return status;
   }
 
+  async printMonthlyReport(dateRange) {
+    // Fiscal-memory report, optionally bounded by a date range / detailed flag.
+    // (The POS report button sends no range → a full report.) Without this the
+    // base has no such method and the call fails with "Unknown fiscal device
+    // error".
+    const prms = {};
+    if (dateRange && dateRange.StartDate) prms.startDate = String(dateRange.StartDate);
+    if (dateRange && dateRange.EndDate) prms.endDate = String(dateRange.EndDate);
+    if (dateRange && dateRange.Detailed) prms.detailed = true;
+    const { status } = await this._request('printFiscalMemoryReport', prms);
+    return status;
+  }
+
   async rawRequest(requestFrame) {
     let request;
     try {
