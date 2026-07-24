@@ -192,19 +192,29 @@ export function createSisEmulator(options = {}) {
 
   /** Render a Z/X report or duplicate. The emulator has no daily totals, so this
    *  is a summary of its state — a real device prints the full fiscal figures. */
-  function renderReportText(kind, date) {
-    return [
+  function renderReportText(kind, date, detailed) {
+    const lines = [
       '========================================',
       `  ${kind}`,
       '========================================',
       `ФУ / Device:  ${state.fdNumber}    ФП / FM: ${state.fmNumber}`,
       RULE,
+    ];
+    // Only the fiscal-memory report carries a short/detailed distinction
+    // (detailed is undefined for Z/X/duplicate).
+    if (detailed !== undefined) {
+      lines.push(
+        `Тип / Type:    ${detailed ? 'ПОДРОБЕН (по данъчни групи) / DETAILED' : 'КРАТЪК / SHORT'}`
+      );
+    }
+    lines.push(
       `Бонове / Receipts so far:  ${state.receiptCounter}`,
       `Каса / Cash in drawer:     ${money(state.cashBalance)}`,
       `Дата / Date:   ${isoTs(date)}`,
       '(Емулатор — реалното устройство отпечатва пълните дневни суми.)',
       '========================================',
-    ].join('\n');
+    );
+    return lines.join('\n');
   }
 
   function handle(req) {
@@ -238,11 +248,16 @@ export function createSisEmulator(options = {}) {
           printFiscalMemoryReport: 'ОТЧЕТ ФИСКАЛНА ПАМЕТ / FISCAL MEMORY REPORT',
         };
         let kind = kinds[method];
-        if (method === 'printFiscalMemoryReport' && params && (params.startDate || params.endDate)) {
+        const isMemory = method === 'printFiscalMemoryReport';
+        const detailed = isMemory && params ? !!params.detailed : false;
+        if (isMemory && params && (params.startDate || params.endDate)) {
           kind += ` (${params.startDate || '…'} — ${params.endDate || '…'})`;
         }
-        log(method);
-        emitDoc(kind, renderReportText(kind, new Date()));
+        if (detailed) {
+          kind += ' — ПОДРОБЕН / DETAILED';
+        }
+        log(method + (detailed ? ' (detailed)' : ''));
+        emitDoc(kind, renderReportText(kind, new Date(), isMemory ? detailed : undefined));
         return baseOk(id);
       }
 
