@@ -516,7 +516,7 @@ export class BgSisJsonFiscalPrinter extends BgFiscalPrinter {
   async printMoneyDeposit(transferAmount) {
     const validation = this.validateTransferAmount(transferAmount);
     if (!validation.Ok) return validation;
-    return this._cashHandling(transferAmount.Amount, transferAmount.Operator);
+    return this._cashHandling(transferAmount.Amount, transferAmount.Operator, transferAmount.Reason);
   }
 
   async printMoneyWithdraw(transferAmount) {
@@ -527,10 +527,10 @@ export class BgSisJsonFiscalPrinter extends BgFiscalPrinter {
       status.addError('E403', 'Withdraw amount must be positive number');
       return status;
     }
-    return this._cashHandling(-transferAmount.Amount, transferAmount.Operator);
+    return this._cashHandling(-transferAmount.Amount, transferAmount.Operator, transferAmount.Reason);
   }
 
-  async _cashHandling(amount, operator) {
+  async _cashHandling(amount, operator, reason) {
     const opNum = parseInt(operator, 10);
     const begin = { operatorNumber: isNaN(opNum) ? 1 : opNum };
     const posId = this._getPosId();
@@ -540,6 +540,9 @@ export class BgSisJsonFiscalPrinter extends BgFiscalPrinter {
       beginFiscalReceiptInput: begin,
       amount: String(amount),
     };
+    // Optional operator reason for the cash in/out slip. Devices that don't
+    // support it ignore the extra field; the emulator prints it.
+    if (reason) prms.reason = String(reason);
 
     const { status } = await this._request('cashHandling', prms);
     return status;

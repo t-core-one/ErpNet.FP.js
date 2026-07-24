@@ -173,19 +173,21 @@ export function createSisEmulator(options = {}) {
   const isoTs = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
 
   /** Render a cash in/out slip (deposit = positive amount, withdraw = negative). */
-  function renderCashText(amount, balance, date) {
+  function renderCashText(amount, balance, date, reason) {
     const isIn = amount >= 0;
-    return [
+    const L = [
       '========================================',
       `  ${isIn ? 'ВНАСЯНЕ / CASH IN' : 'ИЗНАСЯНЕ / CASH OUT'}`,
       '========================================',
       `ФУ / Device:  ${state.fdNumber}    ФП / FM: ${state.fmNumber}`,
       RULE,
       `Сума / Amount:         ${money(Math.abs(amount))}`,
-      `Каса след / Balance:   ${money(balance)}`,
-      `Дата / Date:   ${isoTs(date)}`,
-      '========================================',
-    ].join('\n');
+    ];
+    if (reason) L.push(`Основание / Reason:    ${reason}`);
+    L.push(`Каса след / Balance:   ${money(balance)}`);
+    L.push(`Дата / Date:   ${isoTs(date)}`);
+    L.push('========================================');
+    return L.join('\n');
   }
 
   /** Render a Z/X report or duplicate. The emulator has no daily totals, so this
@@ -248,7 +250,7 @@ export function createSisEmulator(options = {}) {
         log(`cashHandling ${amount >= 0 ? 'IN' : 'OUT'} ${money(Math.abs(amount))} balance=${money(state.cashBalance)}`);
         emitDoc(
           `${amount >= 0 ? 'Внасяне' : 'Изнасяне'} ${money(Math.abs(amount))}`,
-          renderCashText(amount, state.cashBalance, new Date())
+          renderCashText(amount, state.cashBalance, new Date(), params && params.reason)
         );
         return baseOk(id);
       }
