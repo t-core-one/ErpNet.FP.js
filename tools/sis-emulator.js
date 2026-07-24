@@ -163,6 +163,48 @@ export function createSisEmulator(options = {}) {
     }
   }
 
+  /** "Print" a document: e-mail it when configured, else echo to the console. */
+  function emitDoc(subject, text) {
+    if (state.email && state.email.to) sendReceiptEmail(subject, text);
+    else log(`document (no e-mail configured):\n${text}`);
+  }
+
+  const RULE = '----------------------------------------';
+  const isoTs = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
+
+  /** Render a cash in/out slip (deposit = positive amount, withdraw = negative). */
+  function renderCashText(amount, balance, date) {
+    const isIn = amount >= 0;
+    return [
+      '========================================',
+      `  ${isIn ? 'ВНАСЯНЕ / CASH IN' : 'ИЗНАСЯНЕ / CASH OUT'}`,
+      '========================================',
+      `ФУ / Device:  ${state.fdNumber}    ФП / FM: ${state.fmNumber}`,
+      RULE,
+      `Сума / Amount:         ${money(Math.abs(amount))}`,
+      `Каса след / Balance:   ${money(balance)}`,
+      `Дата / Date:   ${isoTs(date)}`,
+      '========================================',
+    ].join('\n');
+  }
+
+  /** Render a Z/X report or duplicate. The emulator has no daily totals, so this
+   *  is a summary of its state — a real device prints the full fiscal figures. */
+  function renderReportText(kind, date) {
+    return [
+      '========================================',
+      `  ${kind}`,
+      '========================================',
+      `ФУ / Device:  ${state.fdNumber}    ФП / FM: ${state.fmNumber}`,
+      RULE,
+      `Бонове / Receipts so far:  ${state.receiptCounter}`,
+      `Каса / Cash in drawer:     ${money(state.cashBalance)}`,
+      `Дата / Date:   ${isoTs(date)}`,
+      '(Емулатор — реалното устройство отпечатва пълните дневни суми.)',
+      '========================================',
+    ].join('\n');
+  }
+
   function handle(req) {
     const { id, method, params } = req;
     switch (method) {
@@ -180,11 +222,21 @@ export function createSisEmulator(options = {}) {
         });
 
       case 'setTime':
-      case 'printZReport':
-      case 'printXReport':
-      case 'printDuplicate':
       case 'getError':
         return baseOk(id);
+
+      case 'printZReport':
+      case 'printXReport':
+      case 'printDuplicate': {
+        const kinds = {
+          printZReport: 'Z-ОТЧЕТ / Z REPORT',
+          printXReport: 'X-ОТЧЕТ / X REPORT',
+          printDuplicate: 'ДУБЛИКАТ / DUPLICATE',
+        };
+        log(method);
+        emitDoc(kinds[method], renderReportText(kinds[method], new Date()));
+        return baseOk(id);
+      }
 
       case 'getCashBalance':
         return { ...baseOk(id), cashBalance: state.cashBalance.toFixed(2) };
@@ -193,6 +245,11 @@ export function createSisEmulator(options = {}) {
         // amount is negative for a withdraw (the driver already negates it).
         const amount = Number((params && params.amount) || 0);
         state.cashBalance = round2(state.cashBalance + amount);
+        log(`cashHandling ${amount >= 0 ? 'IN' : 'OUT'} ${money(Math.abs(amount))} balance=${money(state.cashBalance)}`);
+        emitDoc(
+          `${amount >= 0 ? 'Внасяне' : 'Изнасяне'} ${money(Math.abs(amount))}`,
+          renderCashText(amount, state.cashBalance, new Date())
+        );
         return baseOk(id);
       }
 
@@ -227,11 +284,7 @@ export function createSisEmulator(options = {}) {
           isStorno, isInvoice, total, receiptNumber: state.receiptCounter, qr, date: d,
         });
         const subject = `${isStorno ? 'Сторно' : isInvoice ? 'Фактура' : 'Фискален бон'} #${state.receiptCounter}${usn ? ' · УНП ' + usn : ''}`;
-        if (state.email && state.email.to) {
-          sendReceiptEmail(subject, receiptText); // fire-and-forget, never blocks the response
-        } else {
-          log(`receipt (no e-mail configured):\n${receiptText}`);
-        }
+        emitDoc(subject, receiptText); // fire-and-forget e-mail (or console); never blocks the response
 
         return {
           ...baseOk(id),
