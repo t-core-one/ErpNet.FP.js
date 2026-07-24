@@ -35,8 +35,12 @@ function roundHalfAwayFromZero(n, decimals = 2) {
  * Formats a Date as the SIS storno timestamp: "ss,mm,HH;DD,MM,YY"
  */
 function formatStornoDate(dt) {
+  // The original receipt's ReceiptDateTime arrives over the wire as a string
+  // (JSON has no Date type), so coerce; fall back to now if it isn't parseable.
+  let d = dt instanceof Date ? dt : new Date(dt);
+  if (isNaN(d.getTime())) d = new Date();
   const p = n => String(n).padStart(2, '0');
-  return `${p(dt.getSeconds())},${p(dt.getMinutes())},${p(dt.getHours())};${p(dt.getDate())},${p(dt.getMonth() + 1)},${String(dt.getFullYear()).slice(-2)}`;
+  return `${p(d.getSeconds())},${p(d.getMinutes())},${p(d.getHours())};${p(d.getDate())},${p(d.getMonth() + 1)},${String(d.getFullYear()).slice(-2)}`;
 }
 
 /**
