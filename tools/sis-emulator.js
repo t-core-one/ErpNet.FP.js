@@ -31,8 +31,11 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 export function createSisEmulator(options = {}) {
   const state = {
-    fdNumber: options.fdNumber || 'DT970048',      // FU serial (2 letters + 6 digits)
-    fmNumber: options.fmNumber || '50170034',       // fiscal memory serial
+    // Deliberately NOT a real in-service device: the УНП embeds this serial, so
+    // defaulting to a live printer's number would let a smoke test mint numbers
+    // in that device's real series. 'DT999999' is reserved for the emulator.
+    fdNumber: options.fdNumber || 'DT999999',      // FU serial (2 letters + 6 digits)
+    fmNumber: options.fmNumber || '50999999',       // fiscal memory serial
     idNumber: options.idNumber || 'BG204999888',     // tax id
     model: options.model || 'MF-P1200DN',
     fw: options.fw || 'SIS-1.00BG-2024',
