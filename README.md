@@ -248,6 +248,28 @@ node src/index.js
 
 Configuration is in `appsettings.json`. The server listens on port `8001` by default and auto-detects connected fiscal printers on startup.
 
+### Serial line speed
+
+Serial (COM) ports are opened at `115200` unless told otherwise. Not every device
+runs at that rate — a Datecs FP-800 over RS-232 is commonly `9600` — and a
+mismatched speed is indistinguishable from "no printer found" (detection just
+reports `Printers found: 0`). Set the service-wide default:
+
+```json
+"ErpNet.FP": { "BaudRate": 9600 }
+```
+
+or pin it per device in the printer URI, which also works for a mixed fleet:
+
+```json
+"Printers": { "fp800": { "Uri": "bg.dt.p.isl:///dev/ttyUSB0?baud=9600" } }
+```
+
+The URI form wins over `BaudRate`; `?baudrate=` is accepted as an alias. A
+USB-to-RS232 adapter appears as `/dev/ttyUSB0` (FTDI chipsets are the safest
+choice — the port must report a `vendorId`/`manufacturer` or auto-detection
+skips it).
+
 ### On Raspberry Pi
 
 ```bash

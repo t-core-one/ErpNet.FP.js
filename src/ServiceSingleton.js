@@ -49,7 +49,7 @@ export class ServiceSingleton extends ServiceController {
   }
 
   setupProvider() {
-    const comTransport = new ComTransport();
+    const comTransport = new ComTransport(this._configOptions.BaudRate);
     const tcpTransport = new TcpTransport();
     const httpTransport = new HttpTransport();
 

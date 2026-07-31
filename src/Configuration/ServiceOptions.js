@@ -35,6 +35,12 @@ export class ServiceOptions {
     this.PrintersProperties = {};
     this.ExcludePortList = [];
     this.DetectionTimeout = '30s';
+    // Serial (COM) line speed used for auto-detection and for configured
+    // printers that do not pin their own. Not every fiscal printer runs at
+    // 115200 — an FP-800 over RS-232 is often 9600 — and a mismatch is
+    // indistinguishable from "no printer found". A single device can override
+    // this in its URI: bg.dt.p.isl:///dev/ttyUSB0?baud=9600
+    this.BaudRate = 115200;
     this.WebAccess = new WebAccessOptions();
     // Absolute path for the durable УНП counter state. Empty => the register
     // picks a default outside the app dir (USN_STATE_PATH env, else

@@ -75,14 +75,34 @@ export class ComChannel {
   }
 }
 
+/**
+ * Split "/dev/ttyUSB0?baud=9600" into its port path and baud rate. The suffix is
+ * optional; anything unparseable falls back to the transport default. Serial
+ * fiscal printers are not all 115200 — an FP-800 on an RS-232 link is commonly
+ * 9600 — and a mismatched rate looks exactly like "no printer found".
+ */
+export function parsePortAddress(address, defaultBaudRate = DEFAULT_BAUD_RATE) {
+  const [portPath, query = ''] = String(address).split('?');
+  const m = /(?:^|&)baud(?:rate)?=(\d+)/i.exec(query);
+  const baudRate = m ? parseInt(m[1], 10) : defaultBaudRate;
+  return { portPath, baudRate: Number.isFinite(baudRate) && baudRate > 0 ? baudRate : defaultBaudRate };
+}
+
 export class ComTransport extends Transport {
-  constructor() {
+  /** @param {number} [defaultBaudRate] service-wide default (appsettings BaudRate). */
+  constructor(defaultBaudRate = DEFAULT_BAUD_RATE) {
     super();
     this._openedChannels = new Map();
+    this._defaultBaudRate = Number(defaultBaudRate) > 0 ? Number(defaultBaudRate) : DEFAULT_BAUD_RATE;
   }
 
   get transportName() {
     return 'com';
+  }
+
+  _newChannel(address) {
+    const { portPath, baudRate } = parsePortAddress(address, this._defaultBaudRate);
+    return new ComChannel(portPath, baudRate);
   }
 
   async getAvailableAddresses() {
@@ -100,13 +120,13 @@ export class ComTransport extends Transport {
     if (this._openedChannels.has(address)) {
       return this._openedChannels.get(address);
     }
-    const channel = new ComChannel(address, DEFAULT_BAUD_RATE);
+    const channel = this._newChannel(address);
     this._openedChannels.set(address, channel);
     return channel;
   }
 
   createFreshChannel(address) {
-    return new ComChannel(address, DEFAULT_BAUD_RATE);
+    return this._newChannel(address);
   }
 
   cacheChannel(address, channel) {
