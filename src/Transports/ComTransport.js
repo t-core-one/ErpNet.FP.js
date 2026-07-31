@@ -11,13 +11,27 @@ export class ComChannel {
     this._port = null;
     this._buffer = Buffer.alloc(0);
     this._listenerAttached = false;
+    this._disposed = false;
   }
 
   get descriptor() {
     return this._portPath;
   }
 
+  /**
+   * Close for good. Detection races each driver against a timeout and moves on,
+   * but an abandoned driver.connect() keeps retrying — and write() calls open(),
+   * so it would re-open the port *after* cleanup and leak the lock forever (every
+   * later probe then fails with "Cannot lock port", until the service restarts).
+   * Once disposed the channel refuses to re-open, so stragglers die instead.
+   */
+  async dispose() {
+    this._disposed = true;
+    await this.close();
+  }
+
   async open() {
+    if (this._disposed) throw new Error(`Channel for ${this._portPath} has been disposed`);
     if (this._port && this._port.isOpen) return;
     this._port = new SerialPort({
       path: this._portPath,
@@ -140,6 +154,12 @@ export class ComTransport extends Transport {
         break;
       }
     }
-    await channel.close();
+    // Dispose, not just close: in-flight operations abandoned by a detection
+    // timeout would otherwise re-open the port and leak the OS lock.
+    if (typeof channel.dispose === 'function') {
+      await channel.dispose();
+    } else {
+      await channel.close();
+    }
   }
 }
