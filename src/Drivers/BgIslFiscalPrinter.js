@@ -11,6 +11,35 @@ import { ItemType, PriceModifierType, TaxGroup } from '../Core/Item.js';
 import { PaymentType } from '../Core/Payment.js';
 import { withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
 import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
+import { StandardizedStatusMessageException } from '../Exceptions/StandardizedStatusMessageException.js';
+
+/**
+ * Hard failures reported in the ISL status bytes, as [byteIndex, bit, message].
+ *
+ * DELIBERATELY CONSERVATIVE. Every status byte carries 0x80 as a marker plus 7
+ * flag bits, and on a perfectly healthy FP-800 the observed status is
+ * `88 80 80 ea 86 9a` — i.e. bytes 3-5 have many bits set as normal
+ * informational state (fiscal mode, FM formatted, ...) and byte 0 bit 3 ("no
+ * external display") is set too. Treating "any bit set" as an error would fail
+ * every single operation, so only bits that unambiguously mean "the device did
+ * not carry out your command" are listed here. Anything else is left alone.
+ */
+const STATUS_ERROR_BITS = [
+  [0, 0, 'syntax error in the command'],
+  [0, 1, 'command rejected as invalid by the device'],
+  [2, 0, 'out of paper'],
+];
+
+/** Human-readable hard errors present in an ISL status field (empty when fine). */
+export function describeStatusErrors(statusBytes) {
+  const errors = [];
+  for (const [idx, bit, message] of STATUS_ERROR_BITS) {
+    if (idx < statusBytes.length && (statusBytes[idx] & 0x7f) & (1 << bit)) {
+      errors.push(message);
+    }
+  }
+  return errors;
+}
 
 // ─── Protocol constants ────────────────────────────────────────────────────
 const PREAMBLE   = 0x01;
@@ -150,6 +179,23 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       const sepIdx = response.indexOf(SEPARATOR, dataStart);
       const dataEnd = (sepIdx >= dataStart && sepIdx < postIdx) ? sepIdx : postIdx;
       const responseData = dataStart < dataEnd ? response.slice(dataStart, dataEnd) : Buffer.alloc(0);
+
+      // The status field sits between SEPARATOR and POSTAMBLE. It used to be
+      // discarded entirely, so a device that REJECTED the command still looked
+      // like a success to the caller — e.g. the POS reported "Fiscal report
+      // printed" when the printer had done nothing at all.
+      if (sepIdx >= dataStart && sepIdx < postIdx) {
+        const statusBytes = response.slice(sepIdx + 1, postIdx);
+        logger.debug(`cmd 0x${cmd.toString(16)} status=${statusBytes.toString('hex')} dataLen=${responseData.length}`);
+        const errors = describeStatusErrors(statusBytes);
+        if (errors.length) {
+          // Do not retry: a rejection is deterministic, and re-sending a fiscal
+          // command that the device already parsed is never the right recovery.
+          throw new StandardizedStatusMessageException(
+            `Device rejected command 0x${cmd.toString(16)}: ${errors.join('; ')}`
+          );
+        }
+      }
       return responseData;
     }
     throw new InvalidResponseException('No valid ISL response received after retries');
