@@ -70,6 +70,7 @@ function parseDeviceInfo(rawDeviceInfo, extraStr, autoDetect) {
   const info = new DeviceInfo();
   info.SerialNumber = serialNumber;
   info.FiscalMemorySerialNumber = fmSerial;
+  info.SupportsPeriodReport = true;
   info.FirmwareVersion = firmware;
   info.Model = modelName;
   info.Manufacturer = 'Tremol';

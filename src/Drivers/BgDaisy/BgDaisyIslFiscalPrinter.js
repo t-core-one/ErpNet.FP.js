@@ -177,6 +177,7 @@ function parseDeviceInfo(rawDeviceInfo, rawConstants, autoDetect) {
   const info = new DeviceInfo();
   info.SerialNumber = serialNumber;
   info.FiscalMemorySerialNumber = fmSerial;
+  info.SupportsPeriodReport = true;
   info.Manufacturer = manufacturer || 'Daisy';
   info.Model = model;
   info.FirmwareVersion = firmware;

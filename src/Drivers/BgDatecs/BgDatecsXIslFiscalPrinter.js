@@ -1,4 +1,5 @@
 import iconv from 'iconv-lite';
+import logger from '../../logger.js';
 import { BgIslFiscalPrinter, CMD } from '../BgIslFiscalPrinter.js';
 import { DeviceInfo } from '../../Core/DeviceInfo.js';
 import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
@@ -36,6 +37,40 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
       'Operator.ID': '1',
       'Operator.Password': '0000',
     };
+  }
+
+  /**
+   * Closing a receipt on the X series answers with the printer's CONDITION in
+   * the status bytes and the command's OUTCOME in the data — in the same frame.
+   * Paper running out as the receipt closes therefore raises a status error for
+   * a command that actually succeeded: the receipt is already in fiscal memory.
+   *
+   * Treating that as a failure is the expensive mistake. The POS would report
+   * the sale as unfiscalised and a retry would issue a SECOND fiscal receipt
+   * for one sale — a real fiscal document that has to be reversed by hand.
+   *
+   * Error code 0 plus a document number means it landed, so the rejection is
+   * swallowed. Anything else propagates untouched.
+   *
+   * Ported from upstream ErpNet.FP c7bbf80 (PR #209).
+   */
+  async _closeReceipt() {
+    try {
+      return await super._closeReceipt();
+    } catch (e) {
+      if (!e || !e.responseData) {
+        throw e;
+      }
+      const fields = iconv.decode(e.responseData, 'cp1251').split('\t');
+      if (fields.length >= 2 && fields[0].trim() === '0' && fields[1].trim() !== '') {
+        logger.warn(
+          `CloseReceipt reported a printer condition but the receipt is in fiscal memory `
+          + `(document ${fields[1].trim()}); treating as success: ${e.message}`
+        );
+        return;
+      }
+      throw e;
+    }
   }
 
   // Protocol (no USN): {op}\t{pass}\t1\t\t
@@ -278,6 +313,7 @@ function parseDeviceInfo(rawDeviceInfo, autoDetect) {
   const info = new DeviceInfo();
   info.SerialNumber = serialNumber;
   info.FiscalMemorySerialNumber = fmSerial;
+  info.SupportsPeriodReport = true;
   info.Manufacturer = 'Datecs';
   info.Model = model;
   info.FirmwareVersion = firmware;

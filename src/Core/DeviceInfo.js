@@ -13,6 +13,8 @@ export class DeviceInfo {
     this.SupportedPaymentTypes = [];
     this.SupportsSubTotalAmountModifiers = false;
     this.SubTotalAmountModifiersRequireTaxGroup = false;
+    // Fiscal memory report for a custom period (from date to date).
+    this.SupportsPeriodReport = false;
     this.SupportsInvoice = false;
     this.SupportsCreditNote = false;
     this.InvoiceNumberAssignment = 'device-assigned';

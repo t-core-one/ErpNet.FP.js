@@ -154,6 +154,50 @@ export class BgFiscalPrinter {
   rawRequest(requestFrame) { throw new Error('rawRequest must be implemented'); }
   reset(credentials) { throw new Error('reset must be implemented'); }
 
+  /**
+   * Fiscal memory report for a custom period.
+   *
+   * A base implementation on purpose: the route calls this unconditionally, and
+   * a protocol family that has not implemented it (ICP and ZFP were in that
+   * position) would otherwise raise a bare TypeError that reaches the caller as
+   * a 500 with no device status at all. An unsupported device should answer
+   * like any other refusing device.
+   */
+  printMonthlyReport(periodReport) {
+    const status = new DeviceStatusWithReceiptInfo();
+    status.addError('E413', 'Fiscal memory report for a period is not supported by this device');
+    return status;
+  }
+
+  /**
+   * Check only the bounds of the requested period. Everything else is left to
+   * the device, so its own rejection reaches the caller rather than being
+   * pre-empted by a guess about what it will accept.
+   */
+  validatePeriodReport(periodReport) {
+    const status = new DeviceStatusWithReceiptInfo();
+    const start = periodReport && (periodReport.StartDate || periodReport.startDate);
+    const end = periodReport && (periodReport.EndDate || periodReport.endDate);
+    if (!start) {
+      status.addError('E405', 'StartDate of the period report is empty');
+      return status;
+    }
+    if (!end) {
+      status.addError('E405', 'EndDate of the period report is empty');
+      return status;
+    }
+    const s = new Date(start);
+    const e = new Date(end);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
+      status.addError('E405', 'StartDate or EndDate of the period report is not a valid date');
+      return status;
+    }
+    if (s > e) {
+      status.addError('E403', 'StartDate of the period report is after its EndDate');
+    }
+    return status;
+  }
+
   // Base stubs: devices that do not support invoicing return E413.
   // The SIS driver overrides these with real logic; validateInvoice /
   // validateCreditNote above are the reusable field validators it calls.

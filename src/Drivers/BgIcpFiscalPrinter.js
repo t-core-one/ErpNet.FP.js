@@ -11,6 +11,7 @@ import { PaymentType } from '../Core/Payment.js';
 import { ReversalReason } from '../Core/ReversalReceipt.js';
 import { withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
 import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
+import { isDetailedPeriodReport, formatDateDDMMYYYY } from '../Helpers/periodReport.js';
 
 // ─── Protocol constants ────────────────────────────────────────────────────
 const STX  = 0x02;
@@ -429,6 +430,34 @@ export class BgIcpFiscalPrinter extends BgFiscalPrinter {
       await this._request('511', '');
     } catch (e) {
       status.addError('E401', e.message);
+    }
+    return status;
+  }
+
+  /**
+   * Command 55 — fiscal memory report by dates.
+   *
+   * Fields are fixed width and concatenated with no separators:
+   *   {ReportType[2]}{StartDate[8]}{EndDate[8]}, both dates DDMMYYYY.
+   * Report type "01" is detailed and "11" is short, both without a payments
+   * breakdown. Note the eight-digit year here — the ISL and ZFP families use
+   * six-digit DDMMYY, so the formats are NOT interchangeable.
+   *
+   * The device prints the whole period before answering, so this is given the
+   * same extended deadline as the ISL family rather than the normal one.
+   */
+  async printMonthlyReport(periodReport) {
+    const invalid = this.validatePeriodReport(periodReport);
+    if (!invalid.Ok) {
+      return invalid;
+    }
+    const status = new DeviceStatusWithReceiptInfo();
+    try {
+      const type = isDetailedPeriodReport(periodReport) ? '01' : '11';
+      const data = `${type}${formatDateDDMMYYYY(periodReport.StartDate)}${formatDateDDMMYYYY(periodReport.EndDate)}`;
+      await this._request('55', data);
+    } catch (e) {
+      status.addError('E402', e.message);
     }
     return status;
   }

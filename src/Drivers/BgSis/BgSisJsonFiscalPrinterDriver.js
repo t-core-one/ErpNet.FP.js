@@ -62,6 +62,7 @@ function parseDeviceInfo(rawDeviceInfo, model, fwChecksum, autoDetect) {
   const info = new DeviceInfo();
   info.SerialNumber = fdNumber;
   info.FiscalMemorySerialNumber = fmNumber;
+  info.SupportsPeriodReport = true;
   info.Model = model || 'SIS Fiscal Module';
   info.FirmwareVersion = fwChecksum;
   info.Manufacturer = 'SIS Technology';

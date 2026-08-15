@@ -250,6 +250,32 @@ router.post('/:id/mreport', async (req, res) => {
   }
 });
 
+// POST /printers/:id/periodreport
+//
+// Upstream ErpNet.FP's spelling of the same operation our /mreport already
+// performs (PR #208). Both routes are kept: /mreport is what the deployed Odoo
+// module calls, /periodreport is what a client written against upstream calls.
+// The two request shapes differ only in how the report type is named —
+// { Detailed: true } here, { Type: "detailed" } upstream — and
+// isDetailedPeriodReport() accepts either, so one implementation serves both.
+router.post('/:id/periodreport', async (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const printer = service.printers[req.params.id];
+  if (!printer) return res.status(404).json({ error: 'Printer not found' });
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
+  const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
+  try {
+    const result = await service.runAsync(new PrintJob({
+      printer, action: PrintJobAction.MReport, document: req.body,
+      asyncTimeout, timeout, taskId: req.query.taskId,
+    }));
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /printers/:id/duplicate
 router.post('/:id/duplicate', async (req, res) => {
   const service = getService(req);

@@ -164,7 +164,11 @@ describe('BgDatecsPIslFiscalPrinter', () => {
   describe('printZReport', () => {
     it('sends PrintDailyReport with retries=1 and timeout=90000', async () => {
       await printer.printZReport();
-      const [cmd, data, retries, timeout] = printer._sendCommand.mock.calls[0];
+      // Not calls[0]: printZReport probes for an open receipt first
+      // (_abortIfReceiptOpen -> GetReceiptStatus), so the daily report is a
+      // later call. Find it by command rather than by position.
+      const [cmd, data, retries, timeout] =
+        printer._sendCommand.mock.calls.find(c => c[0] === CMD_PRINT_DAILY_REPORT);
       expect(cmd).toBe(CMD_PRINT_DAILY_REPORT);
       expect(data).toBeNull();
       expect(retries).toBe(1);
@@ -177,7 +181,10 @@ describe('BgDatecsPIslFiscalPrinter', () => {
     });
 
     it('returns ok:false when _sendCommand throws', async () => {
-      printer._sendCommand.mockRejectedValueOnce(new Error('timeout'));
+      // Reject every call, not just the first: _abortIfReceiptOpen swallows its
+      // own errors by design, so a one-shot rejection would be consumed there
+      // and the Z report would still succeed.
+      printer._sendCommand.mockRejectedValue(new Error('timeout'));
       const result = await printer.printZReport();
       expect(result.Ok).toBe(false);
     });
@@ -186,7 +193,8 @@ describe('BgDatecsPIslFiscalPrinter', () => {
   describe('printXReport', () => {
     it('sends PrintDailyReport with data="2"', async () => {
       await printer.printXReport();
-      const [cmd, data] = printer._sendCommand.mock.calls[0];
+      const [cmd, data] =
+        printer._sendCommand.mock.calls.find(c => c[0] === CMD_PRINT_DAILY_REPORT);
       expect(cmd).toBe(CMD_PRINT_DAILY_REPORT);
       expect(data).toBe('2');
     });

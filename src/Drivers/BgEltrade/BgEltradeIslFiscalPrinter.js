@@ -157,6 +157,7 @@ function parseDeviceInfo(rawDeviceInfo, autoDetect) {
   const info = new DeviceInfo();
   info.SerialNumber = serialNumber;
   info.FiscalMemorySerialNumber = fmSerial;
+  info.SupportsPeriodReport = true;
   info.Manufacturer = manufacturer || 'Eltrade';
   info.Model = model;
   info.FirmwareVersion = firmware;

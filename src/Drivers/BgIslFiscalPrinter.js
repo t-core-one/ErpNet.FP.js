@@ -9,6 +9,7 @@ import {
 } from '../Core/DeviceStatus.js';
 import { ItemType, PriceModifierType, TaxGroup } from '../Core/Item.js';
 import { PaymentType } from '../Core/Payment.js';
+import { isDetailedPeriodReport, formatDateDDMMYY } from '../Helpers/periodReport.js';
 import { withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
 import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
 import { StandardizedStatusMessageException } from '../Exceptions/StandardizedStatusMessageException.js';
@@ -191,9 +192,18 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
         if (errors.length) {
           // Do not retry: a rejection is deterministic, and re-sending a fiscal
           // command that the device already parsed is never the right recovery.
-          throw new StandardizedStatusMessageException(
+          const rejection = new StandardizedStatusMessageException(
             `Device rejected command 0x${cmd.toString(16)}: ${errors.join('; ')}`
           );
+          // Carry the payload on the exception. The status bytes describe the
+          // condition of the PRINTER, not the outcome of the command, and both
+          // arrive in the same answer — so for some commands the data proves the
+          // operation succeeded even though the status looks bad. Discarding it
+          // here would make that indistinguishable from a real failure (see
+          // BgDatecsXIslFiscalPrinter._closeReceipt).
+          rejection.responseData = responseData;
+          rejection.command = cmd;
+          throw rejection;
         }
       }
       return responseData;
@@ -575,23 +585,30 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     return status;
   }
 
-  async printMonthlyReport(dateRange) {
+  /**
+   * Fiscal memory report for a custom period.
+   *
+   *   0x4F short, 0x5E detailed; data is "{StartDate},{EndDate}", both DDMMYY.
+   *
+   * Both dates are always sent: omitting the end date makes the device print a
+   * monthly (MMYY) or annual (YY) report instead of the requested range.
+   *
+   * The device prints the whole period before answering, hence the single
+   * attempt and the long deadline rather than the usual retry budget.
+   */
+  async printMonthlyReport(periodReport) {
+    const invalid = this.validatePeriodReport(periodReport);
+    if (!invalid.Ok) {
+      return invalid;
+    }
     const status = new DeviceStatusWithReceiptInfo();
     try {
-      const pad2 = n => String(n).padStart(2, '0');
-      // Protocol date format: DDMMYY (no separators)
-      const toDeviceDate = iso => {
-        const d = new Date(iso);
-        return `${pad2(d.getDate())}${pad2(d.getMonth() + 1)}${String(d.getFullYear()).slice(-2)}`;
-      };
-      const start = dateRange && dateRange.StartDate ? toDeviceDate(dateRange.StartDate) : '';
-      const end   = dateRange && dateRange.EndDate   ? toDeviceDate(dateRange.EndDate)   : '';
-      const data = end ? `${start},${end}` : start;
-      // 0x4F = short report, 0x5E = full/detailed report
-      const cmd = (dateRange && dateRange.Detailed)
+      const start = formatDateDDMMYY(periodReport.StartDate);
+      const end = formatDateDDMMYY(periodReport.EndDate);
+      const cmd = isDetailedPeriodReport(periodReport)
         ? CMD.FiscalMemoryFullReport
         : CMD.FiscalMemoryShortReport;
-      await this._sendCommand(cmd, data, 1, 90000);
+      await this._sendCommand(cmd, `${start},${end}`, 1, 90000);
     } catch (e) {
       status.addError('E402', e.message);
     }

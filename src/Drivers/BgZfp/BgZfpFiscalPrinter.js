@@ -10,6 +10,7 @@ import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { withMaxLength, wrapAtLength } from '../../Helpers/Helpers.js';
 import { InvalidResponseException } from '../../Exceptions/InvalidResponseException.js';
+import { isDetailedPeriodReport, formatDateDDMMYY } from '../../Helpers/periodReport.js';
 
 const STX = 0x02;
 const ETX = 0x0A;
@@ -29,6 +30,8 @@ export const CMD = {
   PrintLastDuplicate:         0x3A,
   Subtotal:                   0x33,
   PrintDailyReport:           0x7C,
+  FMReportByDateDetailed:     0x7A,
+  FMReportByDateBrief:        0x7B,
   GetDateTime:                0x68,
   SetDateTime:                0x48,
   ReadLastQR:                 0x72,
@@ -399,6 +402,34 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     const status = new DeviceStatusWithReceiptInfo();
     try { await this._sendCommand(CMD.PrintDailyReport, iconv.encode('Z', 'cp1251')); }
     catch (e) { status.addError('E400', e.message); }
+    return status;
+  }
+
+  /**
+   * Fiscal memory report for a custom period.
+   *
+   *   0x7B brief, 0x7A detailed; data is "DDMMYY;DDMMYY" (semicolon separated).
+   *
+   * Note the separator differs from the ISL family's comma, and the year is two
+   * digits unlike ICP's four. The device prints the whole period before
+   * answering, so it gets a single attempt with a long deadline.
+   */
+  async printMonthlyReport(periodReport) {
+    const invalid = this.validatePeriodReport(periodReport);
+    if (!invalid.Ok) {
+      return invalid;
+    }
+    const status = new DeviceStatusWithReceiptInfo();
+    try {
+      const start = formatDateDDMMYY(periodReport.StartDate);
+      const end = formatDateDDMMYY(periodReport.EndDate);
+      const cmd = isDetailedPeriodReport(periodReport)
+        ? CMD.FMReportByDateDetailed
+        : CMD.FMReportByDateBrief;
+      await this._sendCommand(cmd, iconv.encode(`${start};${end}`, 'cp1251'), 1);
+    } catch (e) {
+      status.addError('E402', e.message);
+    }
     return status;
   }
 
