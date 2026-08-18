@@ -174,7 +174,7 @@ export class BgDatecsPIslFiscalPrinterDriver extends FiscalPrinterDriver {
     if (cached) {
       printer.info = parseDeviceInfo(cached, autoDetect);
       printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
-      printer.info.SupportsSubTotalAmountModifiers = false;
+      printer.info.SupportsSubTotalAmountModifiers = true;
       if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
       return printer;
     }
@@ -183,7 +183,7 @@ export class BgDatecsPIslFiscalPrinterDriver extends FiscalPrinterDriver {
     this.cache.store(cacheKey, rawDeviceInfo, 30000);
     printer.info = parseDeviceInfo(rawDeviceInfo, autoDetect);
     printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
-    printer.info.SupportsSubTotalAmountModifiers = false;
+    printer.info.SupportsSubTotalAmountModifiers = true;
     if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
     return printer;
   }

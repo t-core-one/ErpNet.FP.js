@@ -52,3 +52,38 @@ describe('BgDatecsPIslFiscalPrinter.describeStatusErrors', () => {
     expect(p.describeStatusErrors(Buffer.alloc(0))).toEqual([]);
   });
 });
+
+describe('BgIslFiscalPrinter._assertReceiptSettled', () => {
+  const mk = (deviceAmount) => {
+    const i = Object.create(BgIslFiscalPrinter.prototype);
+    i._getReceiptAmount = async () => deviceAmount;
+    return i;
+  };
+  const settle = async (deviceAmount, payments) => {
+    try { await mk(deviceAmount)._assertReceiptSettled(payments); return 'allowed'; }
+    catch { return 'blocked'; }
+  };
+
+  // The production failure: a discount made the device compute 4.64 while Odoo
+  // paid 4.62, so the receipt could not be closed and was left open.
+  it('blocks a close when the device total and the payments disagree', async () => {
+    expect(await settle(4.64, [{ Amount: 4.62 }])).toBe('blocked');
+    expect(await settle(4.62, [{ Amount: 4.64 }])).toBe('blocked');
+  });
+
+  it('allows an exact match, including split payments and change', async () => {
+    expect(await settle(4.62, [{ Amount: 4.62 }])).toBe('allowed');
+    expect(await settle(10, [{ Amount: 6 }, { Amount: 4 }])).toBe('allowed');
+    expect(await settle(10, [{ Amount: 12 }, { Amount: -2 }])).toBe('allowed');
+  });
+
+  it('stays out of the way when there is nothing to compare', async () => {
+    expect(await settle(4.64, [])).toBe('allowed');       // device pays itself
+    expect(await settle(null, [{ Amount: 4.62 }])).toBe('allowed');
+    expect(await settle(0, [{ Amount: 4.62 }])).toBe('allowed');
+  });
+
+  it('ignores sub-stotinka float noise', async () => {
+    expect(await settle(10, [{ Amount: 9.999999 }])).toBe('allowed');
+  });
+});

@@ -374,6 +374,47 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     await this._sendCommand(CMD.FiscalReceiptSale, str);
   }
 
+  /**
+   * Refuse to close a receipt whose total the device and the caller disagree on.
+   *
+   * The caller computes the money (Odoo does, here) and the DEVICE computes it
+   * again from unit prices, quantities and discounts. When a discount makes the
+   * two diverge — even by one stotinka — the receipt cannot be paid off, the
+   * device refuses to close it, and it is left OPEN. That corrupts the next
+   * receipt as well, which is how this surfaced in production.
+   *
+   * Catching it here makes the failure independent of every arithmetic subtlety
+   * in how discounts are expressed: whatever the cause, the receipt is aborted
+   * with a clear message instead of being abandoned half-printed. Tolerance is
+   * one stotinka, since a residual that small is exactly the rounding case and
+   * still leaves the receipt unclosable.
+   */
+  async _assertReceiptSettled(payments) {
+    if (!payments || payments.length === 0) {
+      return; // _fullPayment() pays whatever the device computed, by definition
+    }
+    const paid = payments.reduce((sum, p) => sum + (p.Amount || 0), 0);
+    let deviceAmount;
+    try {
+      deviceAmount = await this._getReceiptAmount();
+    } catch (e) {
+      return; // never fail a good receipt because the probe itself failed
+    }
+    if (deviceAmount == null || !Number.isFinite(deviceAmount) || deviceAmount === 0) {
+      return; // nothing trustworthy to compare against
+    }
+    const delta = Math.round((deviceAmount - paid) * 100) / 100;
+    if (Math.abs(delta) >= 0.01) {
+      throw new StandardizedStatusMessageException(
+        `Receipt total mismatch: the device computed ${deviceAmount.toFixed(2)} but the `
+        + `payments total ${paid.toFixed(2)} (difference ${delta.toFixed(2)}). `
+        + `Refusing to close — the device would leave the receipt open. `
+        + `This usually means a discount was expressed so that the device's arithmetic `
+        + `differs from the caller's.`
+      );
+    }
+  }
+
   async _addSubtotalChangeAmount(amount) {
     // ISL format: "10;{amount:F2}" — negative = discount, positive = surcharge
     await this._sendCommand(CMD.Subtotal, `10;${amount.toFixed(2)}`);
@@ -470,6 +511,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
           await this._addPayment(payment);
         }
       }
+      await this._assertReceiptSettled(receipt.Payments);
       const receiptAmount = await this._getReceiptAmount();
       await this._closeReceipt();
       const info = await this._getLastReceiptInfo();
@@ -507,6 +549,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
           await this._addPayment(payment);
         }
       }
+      await this._assertReceiptSettled(reversalReceipt.Payments);
       const receiptAmount = await this._getReceiptAmount();
       await this._closeReceipt();
       const info = await this._getLastReceiptInfo();
