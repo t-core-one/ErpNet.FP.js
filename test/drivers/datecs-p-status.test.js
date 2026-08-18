@@ -64,11 +64,16 @@ describe('BgIslFiscalPrinter._assertReceiptSettled', () => {
     catch { return 'blocked'; }
   };
 
-  // The production failure: a discount made the device compute 4.64 while Odoo
-  // paid 4.62, so the receipt could not be closed and was left open.
-  it('blocks a close when the device total and the payments disagree', async () => {
+  // A receipt the device prices higher than what was tendered cannot be paid
+  // off, so it would be left OPEN — which is what corrupted the following
+  // receipt in production.
+  it('blocks a close when the receipt is underpaid', async () => {
     expect(await settle(4.64, [{ Amount: 4.62 }])).toBe('blocked');
-    expect(await settle(4.62, [{ Amount: 4.64 }])).toBe('blocked');
+  });
+
+  // Over-tender is not a mismatch: the device keeps the difference as change.
+  it('allows over-tender', async () => {
+    expect(await settle(4.62, [{ Amount: 4.64 }])).toBe('allowed');
   });
 
   it('allows an exact match, including split payments and change', async () => {

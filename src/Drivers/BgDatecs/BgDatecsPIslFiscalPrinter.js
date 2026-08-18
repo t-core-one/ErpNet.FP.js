@@ -7,7 +7,7 @@ import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoEx
 import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
-import { withMaxLength } from '../../Helpers/Helpers.js';
+import { formatQuantity, withMaxLength } from '../../Helpers/Helpers.js';
 
 // Generated from upstream ErpNet.FP BgDatecsPIslFiscalPrinter.StatusBitsStrings.
 // Only StatusMessageType.Error entries; byte 3 is skipped because it reports the
@@ -121,7 +121,7 @@ export class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
     let str = dept <= 0
       ? `${text}\t${taxText}${price}`
       : `${text}\t${dept}\t${price}`;
-    if (qty !== 0) str += `*${qty}`;
+    if (qty !== 0) str += `*${formatQuantity(qty)}`;
     if (item.PriceModifierType) {
       const val = item.PriceModifierValue || 0;
       switch (item.PriceModifierType) {

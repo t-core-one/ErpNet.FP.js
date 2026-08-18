@@ -66,3 +66,20 @@ export function parseTimeout(s) {
   if (s.endsWith('m')) return parseInt(s.slice(0, -1), 10) * 60000;
   return parseInt(s, 10);
 }
+
+/**
+ * Quantity as the fiscal protocols will accept it.
+ *
+ * IEEE-754 noise reached the wire verbatim: a 1.14 kg line arrived as
+ * `Quantity: 1.1400000000000001`, was sent as "*1.1400000000000001", and the
+ * Datecs FP-800 answered E401 "syntax error" — aborting the receipt after the
+ * earlier lines had already printed. Observed in the Mechka logs on 2026-08-08.
+ *
+ * Three decimals is the resolution these devices accept for weighed goods;
+ * trailing zeros are dropped because "*1.140" is needlessly wide on a 34-column
+ * line and "*1" is what an integer quantity should look like.
+ */
+export function formatQuantity(qty) {
+  const n = Number(qty) || 0;
+  return String(parseFloat(n.toFixed(3)));
+}

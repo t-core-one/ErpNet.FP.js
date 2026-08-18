@@ -10,7 +10,7 @@ import {
 import { ItemType, PriceModifierType, TaxGroup } from '../Core/Item.js';
 import { PaymentType } from '../Core/Payment.js';
 import { isDetailedPeriodReport, formatDateDDMMYY } from '../Helpers/periodReport.js';
-import { withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
+import { formatQuantity, withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
 import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
 import { StandardizedStatusMessageException } from '../Exceptions/StandardizedStatusMessageException.js';
 
@@ -360,7 +360,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     let str = dept <= 0
       ? `${text}\t${taxText}${price}`
       : `${text}\t${dept}\t${price}`;
-    if (qty !== 0) str += `*${qty}`;
+    if (qty !== 0) str += `*${formatQuantity(qty)}`;
     if (item.PriceModifierType) {
       const val = item.PriceModifierValue || 0;
       switch (item.PriceModifierType) {
@@ -390,10 +390,10 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
    * still leaves the receipt unclosable.
    */
   async _assertReceiptSettled(payments) {
-    if (!payments || payments.length === 0) {
+    if (!payments || this._payableOnly(payments).length === 0) {
       return; // _fullPayment() pays whatever the device computed, by definition
     }
-    const paid = payments.reduce((sum, p) => sum + (p.Amount || 0), 0);
+    const tendered = this._payableOnly(payments).reduce((sum, p) => sum + (p.Amount || 0), 0);
     let deviceAmount;
     try {
       deviceAmount = await this._getReceiptAmount();
@@ -403,11 +403,13 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     if (deviceAmount == null || !Number.isFinite(deviceAmount) || deviceAmount === 0) {
       return; // nothing trustworthy to compare against
     }
-    const delta = Math.round((deviceAmount - paid) * 100) / 100;
-    if (Math.abs(delta) >= 0.01) {
+    // Only a SHORTFALL is fatal. Tendering more than the total is normal — the
+    // device keeps the difference as change — so an excess must not be blocked.
+    const shortfall = Math.round((deviceAmount - tendered) * 100) / 100;
+    if (shortfall >= 0.01) {
       throw new StandardizedStatusMessageException(
-        `Receipt total mismatch: the device computed ${deviceAmount.toFixed(2)} but the `
-        + `payments total ${paid.toFixed(2)} (difference ${delta.toFixed(2)}). `
+        `Receipt underpaid: the device computed ${deviceAmount.toFixed(2)} but only `
+        + `${tendered.toFixed(2)} was tendered (short by ${shortfall.toFixed(2)}). `
         + `Refusing to close — the device would leave the receipt open. `
         + `This usually means a discount was expressed so that the device's arithmetic `
         + `differs from the caller's.`
@@ -430,6 +432,27 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     for (const line of lines) {
       await this._sendCommand(CMD.FiscalReceiptComment, line);
     }
+  }
+
+  /**
+   * Payments the device will actually accept.
+   *
+   * A "change" line is not a payment on this protocol. The POS reports change as
+   * a negative amount, PaymentType.Change has no entry in paymentTypeMappings,
+   * and getPaymentTypeText falls back to '0' — so it went on the wire as
+   * "\t0-4.12", a negative CASH payment. Observed on the Mechka FP-800:
+   *
+   *   0x35 status=888088ea869a dataLen=11   <- 10.30 cash, accepted
+   *   0x35 status=a98088ea869a dataLen=1    <- -4.12 change, E401 syntax error
+   *   0x3c                                  <- receipt aborted, half printed
+   *
+   * The device derives change from the tendered amount, so the line is dropped.
+   */
+  _payableOnly(payments) {
+    if (!payments) return [];
+    return payments.filter(
+      (p) => p && p.PaymentType !== PaymentType.Change && (p.Amount || 0) >= 0
+    );
   }
 
   async _addPayment(payment) {
@@ -507,7 +530,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       if (!receipt.Payments || receipt.Payments.length === 0) {
         await this._fullPayment();
       } else {
-        for (const payment of receipt.Payments) {
+        for (const payment of this._payableOnly(receipt.Payments)) {
           await this._addPayment(payment);
         }
       }
@@ -545,7 +568,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       if (!reversalReceipt.Payments || reversalReceipt.Payments.length === 0) {
         await this._fullPayment();
       } else {
-        for (const payment of reversalReceipt.Payments) {
+        for (const payment of this._payableOnly(reversalReceipt.Payments)) {
           await this._addPayment(payment);
         }
       }
