@@ -1,0 +1,54 @@
+import { describe, it, expect } from 'vitest';
+import { BgDatecsPIslFiscalPrinter } from '../../src/Drivers/BgDatecs/BgDatecsPIslFiscalPrinter.js';
+import { BgIslFiscalPrinter } from '../../src/Drivers/BgIslFiscalPrinter.js';
+
+const p = Object.create(BgDatecsPIslFiscalPrinter.prototype);
+const base = Object.create(BgIslFiscalPrinter.prototype);
+const st = (...bytes) => Buffer.from(bytes);
+
+// Observed on both live devices (Sofia FP-700, Mechka FP-800) while healthy.
+const HEALTHY = [0x88, 0x80, 0x80, 0xea, 0x86, 0x9a];
+
+describe('BgDatecsPIslFiscalPrinter.describeStatusErrors', () => {
+  it('reports nothing for the healthy baseline of real hardware', () => {
+    expect(p.describeStatusErrors(st(...HEALTHY))).toEqual([]);
+  });
+
+  it('reports nothing when only the frame markers are set', () => {
+    expect(p.describeStatusErrors(st(0x80, 0x80, 0x80, 0x80, 0x80, 0x80))).toEqual([]);
+  });
+
+  // The regression this table exists for: closing a receipt that is not fully
+  // paid sets E404. The base table watches 3 bits and missed it, so the driver
+  // returned Ok, the POS booked the sale, and the receipt stayed open — which
+  // corrupted both that receipt and the next one.
+  it('detects E404 "not allowed in the current fiscal mode" (refused close)', () => {
+    const errors = p.describeStatusErrors(st(0x80, 0x82, 0x80, 0xea, 0x86, 0x9a));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('E404');
+  });
+
+  it('the conservative base table still misses E404, which is why P overrides it', () => {
+    expect(base.describeStatusErrors(st(0x80, 0x82, 0x80, 0xea, 0x86, 0x9a))).toEqual([]);
+  });
+
+  it.each([
+    ['E199 general error',      [0xa0, 0x80, 0x80, 0xea, 0x86, 0x9a], 'E199'],
+    ['E403 amount overflow',    [0x80, 0x81, 0x80, 0xea, 0x86, 0x9a], 'E403'],
+    ['E301 no paper',           [0x80, 0x80, 0x81, 0xea, 0x86, 0x9a], 'E301'],
+    ['E302 cover open',         [0xc0, 0x80, 0x80, 0xea, 0x86, 0x9a], 'E302'],
+    ['E201 fiscal memory full', [0x80, 0x80, 0x80, 0xea, 0x90, 0x9a], 'E201'],
+  ])('detects %s', (_label, bytes, code) => {
+    const errors = p.describeStatusErrors(st(...bytes));
+    expect(errors.join(' ')).toContain(code);
+  });
+
+  it('never treats byte 3 as a fault — it carries the DIP-switch state', () => {
+    expect(p.describeStatusErrors(st(0x80, 0x80, 0x80, 0xff, 0x80, 0x80))).toEqual([]);
+  });
+
+  it('tolerates a short or empty status field', () => {
+    expect(p.describeStatusErrors(st(0x80))).toEqual([]);
+    expect(p.describeStatusErrors(Buffer.alloc(0))).toEqual([]);
+  });
+});

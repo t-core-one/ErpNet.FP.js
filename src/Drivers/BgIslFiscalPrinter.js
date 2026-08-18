@@ -95,6 +95,19 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     };
   }
 
+  /**
+   * Which status bits mean "this command failed".
+   *
+   * Overridable per device family: Datecs C, P and X each publish a different
+   * table, so a shared one is either too narrow (a real rejection passes as
+   * success) or too wide (a healthy device fails every command). The base is
+   * the conservative subset common to all ISL devices; BgDatecsPIslFiscalPrinter
+   * supplies the full FP-700/FP-800 table.
+   */
+  describeStatusErrors(statusBytes) {
+    return describeStatusErrors(statusBytes);
+  }
+
   getTaxGroupText(taxGroup) {
     const map = {
       [TaxGroup.TaxGroup1]: 'А', // U+0410 → cp1251 0xC0
@@ -188,7 +201,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       if (sepIdx >= dataStart && sepIdx < postIdx) {
         const statusBytes = response.slice(sepIdx + 1, postIdx);
         logger.debug(`cmd 0x${cmd.toString(16)} status=${statusBytes.toString('hex')} dataLen=${responseData.length}`);
-        const errors = describeStatusErrors(statusBytes);
+        const errors = this.describeStatusErrors(statusBytes);
         if (errors.length) {
           // Do not retry: a rejection is deterministic, and re-sending a fiscal
           // command that the device already parsed is never the right recovery.

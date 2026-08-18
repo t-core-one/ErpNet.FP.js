@@ -9,6 +9,32 @@ import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
 import { withMaxLength } from '../../Helpers/Helpers.js';
 
+// Generated from upstream ErpNet.FP BgDatecsPIslFiscalPrinter.StatusBitsStrings.
+// Only StatusMessageType.Error entries; byte 3 is skipped because it reports the
+// DIP-switch state (SW1..SW7) rather than a fault.
+const P_STATUS_ERROR_BITS = [
+  [0, 0, 'E401', 'Syntax error in the received data'],
+  [0, 1, 'E402', 'Invalid command code received'],
+  [0, 2, 'E103', 'The clock is not set'],
+  [0, 4, 'E303', 'Printing unit fault'],
+  [0, 5, 'E199', 'General error'],
+  [0, 6, 'E302', 'The printer cover is open'],
+  [1, 0, 'E403', 'The command resulted in an overflow of some amount fields'],
+  [1, 1, 'E404', 'The command is not allowed in the current fiscal mode'],
+  [1, 2, 'E104', 'The RAM has been reset'],
+  [1, 3, 'E102', 'Low battery (the real-time clock is in RESET status)'],
+  [1, 6, 'E599', 'The built-in tax terminal is not responding'],
+  [2, 0, 'E301', 'No paper'],
+  [2, 2, 'E206', 'End of the EJ'],
+  [4, 0, 'E202', 'Fiscal memory store error'],
+  [4, 4, 'E201', 'The fiscal memory is full'],
+  [4, 5, 'E299', 'FM general error'],
+  [4, 6, 'E304', 'The printing head is overheated'],
+  [5, 0, 'E204', 'The fiscal memory is set in READONLY mode (locked)'],
+  [5, 2, 'E202', 'The last fiscal memory store operation is not successful'],
+  [5, 5, 'E203', 'Fiscal memory read error'],
+];
+
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.p.isl';
 const CMD_OPEN_REVERSAL = 0x2E;
@@ -33,6 +59,30 @@ export class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
       [PaymentType.Reserved1]:     'I',
       [PaymentType.Reserved2]:     'L',
     };
+  }
+
+  /**
+   * Full FP-700 / FP-800 status table, from the device documentation via
+   * upstream's ParseStatus.
+   *
+   * The base class checks only three bits, which is why a REFUSED command could
+   * pass as success: closing a receipt that is not fully paid sets E404 ("not
+   * allowed in the current fiscal mode"), and with only 3 bits watched the
+   * driver returned Ok, the POS booked the sale, and the receipt stayed open —
+   * corrupting that receipt and the next one.
+   *
+   * Verified against the healthy baseline observed on both live devices,
+   * `88 80 80 ea 86 9a`, which yields no errors: bit 7 of every byte is a frame
+   * marker and the remaining set bits there are informational.
+   */
+  describeStatusErrors(statusBytes) {
+    const errors = [];
+    for (const [idx, bit, code, text] of P_STATUS_ERROR_BITS) {
+      if (idx < statusBytes.length && (statusBytes[idx] >> bit) & 1) {
+        errors.push(`${code} ${text}`);
+      }
+    }
+    return errors;
   }
 
   getDefaultOptions() {
