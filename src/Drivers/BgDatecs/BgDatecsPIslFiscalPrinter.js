@@ -35,6 +35,11 @@ const P_STATUS_ERROR_BITS = [
   [5, 5, 'E203', 'Fiscal memory read error'],
 ];
 
+// Reported by cash() in place of a real reading — see the note there. Large
+// enough that a caller's "is there enough cash?" pre-check never blocks, because
+// the device performs the real check itself.
+const CASH_BALANCE_UNKNOWN = 9999999;
+
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.p.isl';
 const CMD_OPEN_REVERSAL = 0x2E;
@@ -134,12 +139,33 @@ export class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
     await this._sendCommand(CMD.FiscalReceiptSale, str);
   }
 
-  // MoneyTransfer "0" causes the FP-700 (P model) to print a Cash-In receipt even for
-  // zero amount.  Skip the printer query and return a large sentinel so the Odoo
-  // pre-refund cash check always passes; the printer enforces the real cash limit.
+  /**
+   * The drawer balance is NOT read from the device on this family.
+   *
+   * Reading it means sending MoneyTransfer (0x46), and an FP-700/FP-800 prints a
+   * служебно въведени slip even for a zero amount — confirmed on the Mechka
+   * FP-800, which answers "P,+000000000000,+000000000000,+000000000000" and
+   * still puts paper through. The POS calls this before every withdrawal, so an
+   * accurate balance would cost a stray slip each time.
+   *
+   * The amount below is therefore a deliberate "no known limit" placeholder, not
+   * a reading, so a caller's pre-check can never block a legitimate withdrawal.
+   * The real limit is still enforced one step later by the device itself:
+   * printMoneyWithdraw raises E301 when the printer refuses for lack of cash.
+   *
+   * The warning states this, so nothing downstream mistakes the placeholder for
+   * a real balance. It is a warning and not an error on purpose — DeviceStatus
+   * only clears Ok for errors, and the POS throws on !ok.
+   */
   async cash() {
     const status = new DeviceStatusWithCashAmount();
-    status.Amount = 9999999;
+    status.Amount = CASH_BALANCE_UNKNOWN;
+    status.addWarning(
+      'W301',
+      'Cash balance is not read on this device family: querying it would print a '
+      + 'slip. The amount is a placeholder, not a reading — the printer enforces '
+      + 'the real limit when a withdrawal is attempted.'
+    );
     return status;
   }
 

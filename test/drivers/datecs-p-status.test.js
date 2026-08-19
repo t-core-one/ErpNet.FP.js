@@ -92,3 +92,34 @@ describe('BgIslFiscalPrinter._assertReceiptSettled', () => {
     expect(await settle(10, [{ Amount: 9.999999 }])).toBe('allowed');
   });
 });
+
+describe('BgDatecsPIslFiscalPrinter.cash', () => {
+  const p = Object.create(BgDatecsPIslFiscalPrinter.prototype);
+
+  // Reading the real balance means sending 0x46, which prints a slip on this
+  // family even for a zero amount. The reported figure is a placeholder; the
+  // device enforces the real limit when a withdrawal is attempted (E301).
+  it('stays Ok, or the POS would treat it as a device failure', async () => {
+    expect((await p.cash()).Ok).toBe(true);
+  });
+
+  it('keeps the placeholder high so a legitimate withdrawal is never pre-blocked', async () => {
+    expect((await p.cash()).Amount).toBeGreaterThan(100000);
+  });
+
+  it('says out loud that the amount is not a reading', async () => {
+    const messages = (await p.cash()).Messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0].Type).toBe('warning');
+    expect(messages[0].Code).toBe('W301');
+    expect(messages[0].Text).toMatch(/placeholder, not a reading/);
+  });
+
+  it('never touches the device', async () => {
+    const spy = Object.create(BgDatecsPIslFiscalPrinter.prototype);
+    let called = false;
+    spy._sendCommand = async () => { called = true; };
+    await spy.cash();
+    expect(called).toBe(false);
+  });
+});
