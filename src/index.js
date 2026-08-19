@@ -65,21 +65,26 @@ async function main() {
     res.json = (data) => orig(toCamelCase(data));
     next();
   });
+  const webAccess = service.configOptions.WebAccess || {};
+
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    // Private Network Access. A page served from a PUBLIC origin (the cloud
+    // Odoo) that calls a PRIVATE address (this box on the shop LAN) is blocked
+    // by Chrome unless the PREFLIGHT carries this header — and the preflight is
+    // exactly the OPTIONS request short-circuited two lines below. Setting it in
+    // a later middleware, as this did, meant it was never sent on a preflight:
+    // simple GETs still worked, every POST failed, and the POS reported the
+    // server unreachable while its own web UI (same-origin, no preflight)
+    // worked fine.
+    if (webAccess.EnablePrivateNetwork) {
+      res.header('Access-Control-Allow-Private-Network', 'true');
+    }
     if (req.method === 'OPTIONS') return res.sendStatus(200);
     next();
   });
-
-  const webAccess = service.configOptions.WebAccess || {};
-  if (webAccess.EnablePrivateNetwork) {
-    app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Private-Network', 'true');
-      next();
-    });
-  }
 
   app.use((req, res, next) => {
     const start = Date.now();
