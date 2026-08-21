@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import logger from './logger.js';
 import { ServiceController } from './Service/ServiceController.js';
-import { ServiceOptions } from './Configuration/ServiceOptions.js';
+import { ServiceOptions, normalizeWebAccess } from './Configuration/ServiceOptions.js';
 import { Provider } from './Provider/Provider.js';
 import { ComTransport } from './Transports/ComTransport.js';
 import { TcpTransport } from './Transports/TcpTransport.js';
@@ -45,6 +45,10 @@ export class ServiceSingleton extends ServiceController {
   constructor() {
     const configData = loadConfig();
     const opts = Object.assign(new ServiceOptions(), configData);
+    // Object.assign is shallow, so a WebAccess block in the file replaces the
+    // defaults wholesale rather than merging with them. Rebuild it so partial
+    // and camelCase blocks both land on a complete, canonically-cased object.
+    opts.WebAccess = normalizeWebAccess(configData.WebAccess ?? configData.webAccess);
     super(opts);
   }
 

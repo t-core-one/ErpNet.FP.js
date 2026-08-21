@@ -8,6 +8,7 @@ import { ServiceSingleton } from './ServiceSingleton.js';
 import { KeepAliveService } from './Service/KeepAliveService.js';
 import printersRouter from './Routes/printers.js';
 import serviceRouter from './Routes/service.js';
+import { corsMiddleware } from './Middleware/cors.js';
 
 const { version: SERVER_VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -65,26 +66,9 @@ async function main() {
     res.json = (data) => orig(toCamelCase(data));
     next();
   });
-  const webAccess = service.configOptions.WebAccess || {};
-
-  app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    // Private Network Access. A page served from a PUBLIC origin (the cloud
-    // Odoo) that calls a PRIVATE address (this box on the shop LAN) is blocked
-    // by Chrome unless the PREFLIGHT carries this header — and the preflight is
-    // exactly the OPTIONS request short-circuited two lines below. Setting it in
-    // a later middleware, as this did, meant it was never sent on a preflight:
-    // simple GETs still worked, every POST failed, and the POS reported the
-    // server unreachable while its own web UI (same-origin, no preflight)
-    // worked fine.
-    if (webAccess.EnablePrivateNetwork) {
-      res.header('Access-Control-Allow-Private-Network', 'true');
-    }
-    if (req.method === 'OPTIONS') return res.sendStatus(200);
-    next();
-  });
+  // WebAccess may have been written by the server's own UI, which sends
+  // camelCase; the middleware normalises whatever casing it is given.
+  app.use(corsMiddleware(service.configOptions.WebAccess ?? service.configOptions.webAccess));
 
   app.use((req, res, next) => {
     const start = Date.now();

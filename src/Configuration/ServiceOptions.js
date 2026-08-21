@@ -26,6 +26,39 @@ export class WebAccessOptions {
   }
 }
 
+/**
+ * Read a WebAccess block whatever casing it arrives in.
+ *
+ * The settings reach this object from two directions that disagreed on case.
+ * The server's own web UI POSTs camelCase (`enablePrivateNetwork`) and that body
+ * was persisted to appsettings.json verbatim, while every reader used PascalCase
+ * like the rest of the options. Because the config is loaded with a shallow
+ * Object.assign, a camelCase WebAccess block REPLACED this whole defaults object
+ * instead of merging into it, so EnablePrivateNetwork read back as undefined:
+ * the tickbox in the UI saved, reloaded ticked, and did nothing at all. On the
+ * Sofia box that meant no Access-Control-Allow-Private-Network on the preflight,
+ * so every POS POST to the LAN failed as "server not reachable".
+ *
+ * Normalising on the way in keeps exactly one casing inside the service and
+ * leaves already-deployed appsettings.json files working untouched.
+ */
+export function normalizeWebAccess(raw) {
+  const opts = new WebAccessOptions();
+  if (!raw || typeof raw !== 'object') {
+    return opts;
+  }
+  const pick = (...names) => names.map((n) => raw[n]).find((v) => v !== undefined);
+  const origins = pick('AllowedOrigins', 'allowedOrigins');
+  if (Array.isArray(origins)) {
+    opts.AllowedOrigins = origins;
+  }
+  const enablePrivateNetwork = pick('EnablePrivateNetwork', 'enablePrivateNetwork');
+  if (enablePrivateNetwork !== undefined) {
+    opts.EnablePrivateNetwork = Boolean(enablePrivateNetwork);
+  }
+  return opts;
+}
+
 export class ServiceOptions {
   constructor() {
     this.AutoDetect = true;

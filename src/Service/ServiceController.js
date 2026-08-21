@@ -8,7 +8,7 @@ const { version: SERVER_VERSION } = JSON.parse(
 import { Provider } from '../Provider/Provider.js';
 import { TaskStatus } from './TaskStatus.js';
 import { DEFAULT_TIMEOUT } from './PrintJob.js';
-import { ServiceOptions } from '../Configuration/ServiceOptions.js';
+import { ServiceOptions, normalizeWebAccess } from '../Configuration/ServiceOptions.js';
 import { UsnRegister } from './UsnRegister.js';
 
 // How long a finished task's result is retained so a client that lost the poll
@@ -270,7 +270,10 @@ export class ServiceController {
   }
 
   setWebAccess(webAccess) {
-    this._configOptions.WebAccess = webAccess;
+    // The web UI POSTs camelCase and this body used to be persisted verbatim,
+    // producing a file the readers could not see. Normalise before storing so
+    // what is written back is always canonical.
+    this._configOptions.WebAccess = normalizeWebAccess(webAccess);
     this._writeOptions();
   }
 
