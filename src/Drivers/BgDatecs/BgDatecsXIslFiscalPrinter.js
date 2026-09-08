@@ -18,10 +18,67 @@ const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.x.isl';
 const CMD_OPEN_STORNO = 0x2B;
 
+/**
+ * Status bits for the X series, indexed as byteIndex * 8 + bitIndex.
+ *
+ * The X protocol reports EIGHT status bytes where the older dialect reports six,
+ * and the meanings are not the same, so decoding an X reply with the base table
+ * silently mislabels the device's condition. Bit 7 of each byte is a marker and
+ * lands on a reserved (empty) entry here rather than being masked off, which is
+ * how upstream handles it too.
+ *
+ * Only entries that mean something are listed; everything else is reserved.
+ * Ported from upstream ErpNet.FP BgDatecsXIslFiscalPrinter.Commands.cs.
+ */
+const X_STATUS_BITS = {
+  0:  ['E401', 'Syntax error', 'error'],
+  1:  ['E402', 'Command code is invalid', 'error'],
+  2:  ['E103', 'The real time clock is not synchronized', 'error'],
+  4:  ['E303', 'Failure in printing mechanism', 'error'],
+  5:  ['E199', 'General error', 'error'],
+  6:  ['E302', 'Cover is open', 'error'],
+
+  8:  ['E403', 'Overflow during command execution', 'error'],
+  9:  ['E404', 'Command is not permitted', 'error'],
+
+  16: ['E301', 'End of paper', 'error'],
+  17: ['W301', 'Near paper end', 'warning'],
+  18: ['E206', 'EJ is full', 'error'],
+  19: [null, 'Fiscal receipt is open', 'info'],
+  20: ['W202', 'EJ nearly full', 'warning'],
+  21: [null, 'Nonfiscal receipt is open', 'info'],
+
+  32: ['E203', 'Error when trying to access data stored in the FM', 'error'],
+  33: [null, 'Tax number is set', 'info'],
+  34: [null, 'Serial number and number of FM are set', 'info'],
+  35: ['W201', 'There is space for less then 60 reports in Fiscal memory', 'warning'],
+  36: ['E201', 'FM full', 'error'],
+  37: ['E299', 'FM general error', 'error'],
+  38: ['E205', 'Fiscal memory is not found or damaged', 'error'],
+
+  41: [null, 'FM is formatted', 'info'],
+  43: [null, 'Device is fiscalized', 'info'],
+  44: [null, 'VAT are set at least once', 'info'],
+};
+
+/** Each hex nibble + 0x30, so 0xB becomes 0x3B. Not ASCII hex. */
+function uint16To4Bytes(word) {
+  return Buffer.from([
+    ((word >> 12) & 0x0f) + 0x30,
+    ((word >> 8) & 0x0f) + 0x30,
+    ((word >> 4) & 0x0f) + 0x30,
+    (word & 0x0f) + 0x30,
+  ]);
+}
+
 export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
     this.info.SupportPaymentTerminal = true;
+
+    // This family's LEN and CMD are four bytes each, not one, so the payload
+    // starts ten bytes past the preamble instead of four.
+    this.responseHeaderLength = 10;
 
     this.paymentTypeMappings = {
       [PaymentType.Cash]: '0',
@@ -30,6 +87,63 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
       [PaymentType.ExtCoupons]: '4',
       [PaymentType.Card]: '1',
     };
+  }
+
+
+  /**
+   * The X series frame, which is NOT the frame the rest of the ISL family uses.
+   *
+   * Two header fields widen from one byte to four — LEN and CMD — each written
+   * as UInt16To4Bytes (hex nibble + 0x30). Everything else is identical to the
+   * base: preamble, one-byte SEQ, raw CP1251 data, postamble, a four-byte BCC
+   * over every byte after the preamble through the postamble, and terminator.
+   *
+   * Without this override the port sends the older one-byte-header frame to an
+   * X device. The device answers SYN then NAK to every command — a checksum and
+   * format complaint, not a refusal — so nothing is detected and every driver
+   * simply times out. The symptom is indistinguishable from an unplugged or
+   * silent printer, which is what made it expensive to find.
+   *
+   * Ported from upstream ErpNet.FP BgDatecsXIslFiscalPrinter.Frame.cs. Covers
+   * FP-700X, FP-700XR, DP-25X, DP-05C, WP-500X, WP-50X, FMP-350X and FMP-55X.
+   */
+  _buildHostFrame(seq, cmd, data) {
+    const payload = data || Buffer.alloc(0);
+    const body = Buffer.concat([
+      uint16To4Bytes(0x20 + 10 + payload.length),
+      Buffer.from([seq]),
+      uint16To4Bytes(cmd),
+      payload,
+      Buffer.from([0x05]),
+    ]);
+    let bcc = 0;
+    for (const b of body) bcc += b;
+    return Buffer.concat([
+      Buffer.from([0x01]),
+      body,
+      uint16To4Bytes(bcc & 0xffff),
+      Buffer.from([0x03]),
+    ]);
+  }
+
+  /**
+   * Decode the eight X status bytes. Only errors are returned, because the
+   * caller treats a non-empty result as a rejection — the informational bits a
+   * healthy device always sets (fiscalized, FM formatted, VAT set) must never
+   * reach it, or every command would look like a failure.
+   */
+  describeStatusErrors(statusBytes) {
+    const errors = [];
+    for (let i = 0; i < statusBytes.length; i++) {
+      for (let bit = 0; bit < 8; bit++) {
+        if (!(statusBytes[i] & (1 << bit))) continue;
+        const entry = X_STATUS_BITS[i * 8 + bit];
+        if (entry && entry[2] === 'error') {
+          errors.push(entry[0] ? `${entry[0]} ${entry[1]}` : entry[1]);
+        }
+      }
+    }
+    return errors;
   }
 
   getDefaultOptions() {

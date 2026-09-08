@@ -80,6 +80,11 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     super(channel, serviceOptions, options);
     this._seqNum = 0;
 
+    // Bytes before the response payload: PREAMBLE | LEN | SEQ | CMD_ECHO, one
+    // each in this dialect. BgDatecsXIslFiscalPrinter raises it to 10, matching
+    // the wider LEN and CMD fields its frame builder writes.
+    this.responseHeaderLength = 4;
+
     this.paymentTypeMappings = {
       [PaymentType.Cash]: '0',
       [PaymentType.Check]: '1',
@@ -188,8 +193,10 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       if (postIdx < 0) continue;
 
       // Response: PREAMBLE | LEN | SEQ | CMD_ECHO | data | SEPARATOR | status | POSTAMBLE
-      // data starts right after CMD_ECHO (4 header bytes), ends at SEPARATOR
-      const dataStart = preIdx + 4;
+      // data starts right after CMD_ECHO, ends at SEPARATOR. The header is four
+      // bytes in this dialect, but the Datecs X series widens LEN and CMD to
+      // four bytes each, so the offset is a property rather than a constant.
+      const dataStart = preIdx + this.responseHeaderLength;
       const sepIdx = response.indexOf(SEPARATOR, dataStart);
       const dataEnd = (sepIdx >= dataStart && sepIdx < postIdx) ? sepIdx : postIdx;
       const responseData = dataStart < dataEnd ? response.slice(dataStart, dataEnd) : Buffer.alloc(0);
