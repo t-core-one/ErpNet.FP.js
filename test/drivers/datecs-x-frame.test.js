@@ -176,3 +176,35 @@ describe('Datecs X receipt amount', () => {
     expect(await p._getReceiptAmount()).toBe(0);
   });
 });
+
+/**
+ * A reversal's reference date crosses the wire as JSON, which has no Date type,
+ * so it arrives as an ISO string. The X driver formatted it with date methods
+ * directly and threw "dt.getFullYear is not a function", failing the storno
+ * before a single byte reached the device.
+ */
+describe('Datecs X storno reference date', () => {
+  const open = (receiptDateTime) => new BgDatecsXIslFiscalPrinter({}, {}, {})
+    ._formatOpenReversalReceipt({
+      UniqueSaleNumber: 'DT652532-0053-0000009',
+      ReceiptNumber: '9765',
+      FiscalMemorySerialNumber: '79012510',
+      ReceiptDateTime: receiptDateTime,
+    });
+
+  it('accepts the ISO string the POS actually sends', () => {
+    // Exactly what Odoo stores in fd_receipt_date.
+    expect(open('2026-09-08T14:36:16.000Z')).toContain('-09-26 ');
+    expect(open('2026-09-08T14:36:16.000Z')).not.toMatch(/NaN/);
+  });
+
+  it('still accepts a real Date', () => {
+    expect(open(new Date(2026, 8, 8, 17, 36, 16))).toContain('08-09-26 17:36:16');
+  });
+
+  it('never emits NaN into a fiscal field for an unparseable date', () => {
+    for (const bad of ['not a date', '', null, undefined, {}]) {
+      expect(open(bad)).not.toMatch(/NaN/);
+    }
+  });
+});

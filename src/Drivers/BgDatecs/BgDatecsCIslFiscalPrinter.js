@@ -5,7 +5,7 @@ import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoEx
 import { PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
-import { withMaxLength } from '../../Helpers/Helpers.js';
+import { withMaxLength, toDate } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.c.isl';
@@ -85,7 +85,7 @@ export class BgDatecsCIslFiscalPrinter extends BgIslFiscalPrinter {
     const fmSerial = reversalReceipt.FiscalMemorySerialNumber || '';
     const reason = this.getReversalReasonText(reversalReceipt.Reason);
     const rawDt = reversalReceipt.ReceiptDateTime;
-    const dt = rawDt ? (rawDt instanceof Date ? rawDt : new Date(rawDt)) : new Date();
+    const dt = toDate(rawDt);
     const pad2 = n => String(n).padStart(2, '0');
     const yr2 = String(dt.getFullYear()).slice(-2);
     const dtStr = `${pad2(dt.getDate())}${pad2(dt.getMonth() + 1)}${yr2}${pad2(dt.getHours())}${pad2(dt.getMinutes())}${pad2(dt.getSeconds())}`;

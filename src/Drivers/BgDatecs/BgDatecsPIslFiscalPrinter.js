@@ -7,7 +7,7 @@ import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoEx
 import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
-import { formatQuantity, withMaxLength } from '../../Helpers/Helpers.js';
+import { formatQuantity, withMaxLength, toDate } from '../../Helpers/Helpers.js';
 
 // Generated from upstream ErpNet.FP BgDatecsPIslFiscalPrinter.StatusBitsStrings.
 // Only StatusMessageType.Error entries; byte 3 is skipped because it reports the
@@ -178,7 +178,7 @@ export class BgDatecsPIslFiscalPrinter extends BgIslFiscalPrinter {
     const fmSerial = reversalReceipt.FiscalMemorySerialNumber || '';
     const reason = this.getReversalReasonText(reversalReceipt.Reason);
     const rawDt = reversalReceipt.ReceiptDateTime;
-    const dt = rawDt ? (rawDt instanceof Date ? rawDt : new Date(rawDt)) : new Date();
+    const dt = toDate(rawDt);
     const pad2 = n => String(n).padStart(2, '0');
     const yr2 = String(dt.getFullYear()).slice(-2);
     const dtStr = `${pad2(dt.getDate())}${pad2(dt.getMonth() + 1)}${yr2}${pad2(dt.getHours())}${pad2(dt.getMinutes())}${pad2(dt.getSeconds())}`;

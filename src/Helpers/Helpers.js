@@ -83,3 +83,23 @@ export function formatQuantity(qty) {
   const n = Number(qty) || 0;
   return String(parseFloat(n.toFixed(3)));
 }
+
+/**
+ * Coerce a caller-supplied date into a Date.
+ *
+ * Dates reach the drivers over JSON, which has no Date type, so a reversal's
+ * ReceiptDateTime arrives as an ISO string like "2026-09-08T14:36:16.000Z".
+ * Formatting it directly threw "dt.getFullYear is not a function" and failed
+ * the storno outright. An unparseable value falls back to now rather than
+ * emitting NaN-NaN-NaN into a fiscal field.
+ */
+export function toDate(value, fallback = null) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? (fallback || new Date()) : value;
+  }
+  if (value === null || value === undefined || value === '') {
+    return fallback || new Date();
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? (fallback || new Date()) : d;
+}

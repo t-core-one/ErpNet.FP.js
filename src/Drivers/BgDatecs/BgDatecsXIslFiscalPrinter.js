@@ -13,7 +13,7 @@ import {
 import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
-import { withMaxLength, wrapAtLength } from '../../Helpers/Helpers.js';
+import { withMaxLength, wrapAtLength, toDate } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.x.isl';
@@ -312,7 +312,9 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     const receiptNum = reversalReceipt.ReceiptNumber || '';
     const fmSerial = reversalReceipt.FiscalMemorySerialNumber || '';
     const reason = this.getReversalReasonText(reversalReceipt.Reason);
-    const dt = reversalReceipt.ReceiptDateTime || new Date();
+    // Arrives as an ISO string over JSON, never a Date — calling date methods
+    // on it directly threw "dt.getFullYear is not a function" and failed the storno.
+    const dt = toDate(reversalReceipt.ReceiptDateTime);
     const pad2 = n => String(n).padStart(2, '0');
     const yr2 = String(dt.getFullYear()).slice(-2);
     const dtStr = `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${yr2} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}`;
