@@ -7,6 +7,7 @@ import { ReversalReason } from '../Core/ReversalReceipt.js';
 import { RecipientIdentifierType } from '../Core/Recipient.js';
 import { NumberAssignment } from '../Core/NumberAssignment.js';
 import { InvoiceInfo } from '../Core/InvoiceInfo.js';
+import { StandardizedStatusMessageException } from '../Exceptions/StandardizedStatusMessageException.js';
 
 const USN_REGEX = /^[A-Z]{2}[0-9]{6}-[A-Z0-9]{4}-[0-9]{7}$/;
 
@@ -41,8 +42,28 @@ export class BgFiscalPrinter {
     return iconv.decode(buf, this.encoding);
   }
 
+  /**
+   * Refuse rather than guess.
+   *
+   * This used to fall back to '0' for anything unmapped — which is CASH. A
+   * payment type the device does not support therefore printed silently as cash
+   * on a fiscal receipt, misstating how the customer paid. It has caused two
+   * separate incidents: a POS "change" line went out as a negative cash payment
+   * and aborted the receipt (see _payableOnly), and a card payment arriving as
+   * Odoo's journal type "bank" — which the Datecs X mapping does not carry —
+   * printed an 18.20 card sale as cash.
+   *
+   * Upstream throws E406 here, and that is the only safe answer: a refused sale
+   * is recoverable, a fiscal document that lies about the payment method is not.
+   */
   getPaymentTypeText(paymentType) {
-    return this.paymentTypeMappings[paymentType] || '0';
+    const mapped = this.paymentTypeMappings[paymentType];
+    if (mapped === undefined || mapped === null) {
+      throw new StandardizedStatusMessageException(
+        `E406 Payment type "${paymentType}" is not supported by this device`
+      );
+    }
+    return mapped;
   }
 
   getReversalReasonText(reason) {

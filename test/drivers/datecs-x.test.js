@@ -149,17 +149,30 @@ describe('BgDatecsXIslFiscalPrinter', () => {
       expect(str).toBe('0\t10.00\t1\t');
     });
 
-    it('terminal flag is 1 for non-card when UsePaymentTerminal is false', async () => {
+    it('always sends "1" in the third field', async () => {
       await printer._addPayment({ PaymentType: PaymentType.Cash, Amount: 5 });
-      const parts = printer._sendCommand.mock.calls[0][1].split('\t');
-      expect(parts[2]).toBe('1');
+      expect(printer._sendCommand.mock.calls[0][1].split('\t')[2]).toBe('1');
     });
 
-    it('terminal flag is 2 for card when UsePaymentTerminal is true', async () => {
+    // Upstream signals the built-in terminal through PaidMode, not the trailing
+    // field: paymentTypeText becomes "2" and field 3 stays "1". This test
+    // previously asserted the opposite, which is what our code did. Taken from
+    // upstream's AddPayment; not verified against a pinpad, as none is fitted to
+    // the devices in the field.
+    it('signals the built-in terminal in PaidMode, not the trailing field', async () => {
       printer.info.UsePaymentTerminal = true;
       await printer._addPayment({ PaymentType: PaymentType.Card, Amount: 20 });
       const parts = printer._sendCommand.mock.calls[0][1].split('\t');
-      expect(parts[2]).toBe('2');
+      expect(parts[0]).toBe('2');
+      expect(parts[2]).toBe('1');
+    });
+
+    it('refuses a payment type this device has no code for', async () => {
+      // Odoo sends its journal type when fd_payment_type is unset, so a card
+      // method arrives as "bank" — which the X mapping does not carry. Printing
+      // it as cash misstates the payment method on a fiscal document.
+      await expect(printer._addPayment({ PaymentType: 'bank', Amount: 18.2 }))
+        .rejects.toThrow(/E406 Payment type "bank" is not supported/);
     });
   });
 

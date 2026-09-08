@@ -358,10 +358,16 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
 
   async _addPayment(payment) {
     // Protocol: {PaidMode}\t{Amount}\t{Type}\t   where Type=1 (normal) or 2 (pinpad)
-    const typeText = this.getPaymentTypeText(payment.PaymentType);
+    // A card paid through the built-in terminal is signalled by PaidMode "2",
+    // not by the trailing field — that one is always "1". We had the two the
+    // wrong way round, which only stayed harmless while no pinpad was in use.
+    let typeText = this.getPaymentTypeText(payment.PaymentType);
+    if (payment.PaymentType === PaymentType.Card
+        && this.info.SupportPaymentTerminal && this.info.UsePaymentTerminal) {
+      typeText = '2';
+    }
     const amount = (payment.Amount || 0).toFixed(2);
-    const terminalFlag = (this.info.UsePaymentTerminal && payment.PaymentType === PaymentType.Card) ? '2' : '1';
-    const str = [typeText, amount, terminalFlag, ''].join('\t');
+    const str = [typeText, amount, '1', ''].join('\t');
     const resp = await this._sendCommand(CMD.FiscalReceiptTotal, str);
     if (this.info.UsePaymentTerminal) {
       const respStr = iconv.decode(resp || Buffer.alloc(0), 'cp1251');
