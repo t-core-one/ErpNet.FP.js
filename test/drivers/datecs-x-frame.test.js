@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { BgDatecsXIslFiscalPrinter } from '../../src/Drivers/BgDatecs/BgDatecsXIslFiscalPrinter.js';
 import { BgDatecsPIslFiscalPrinter } from '../../src/Drivers/BgDatecs/BgDatecsPIslFiscalPrinter.js';
+import { BgIslFiscalPrinter } from '../../src/Drivers/BgIslFiscalPrinter.js';
 
 /**
  * The Datecs X series speaks a different frame from the rest of the ISL family.
@@ -103,5 +104,75 @@ describe('Datecs X status decoding', () => {
     expect(mk(BgDatecsXIslFiscalPrinter).describeStatusErrors(bytes)).toEqual([]);
     expect(mk(BgDatecsPIslFiscalPrinter).describeStatusErrors(bytes))
       .toContain('E104 The RAM has been reset');
+  });
+});
+
+/**
+ * Command results on the X family arrive in the response DATA, not the status
+ * bytes. Field 0 is a result code: "0" for success, a negative number for a
+ * rejection. The base driver reads only the status bytes, so on a live FP-700X
+ * every sale line was refused with -111005 while the printer reported itself
+ * perfectly healthy — the receipt opened, took no items, and could not close.
+ * The paper showed a receipt that started and never finished, and the POS was
+ * told the sale had worked.
+ */
+describe('Datecs X result codes', () => {
+  // The X override calls super._sendCommand, so the base has to be stubbed —
+  // but via a spy that is restored, never by assigning to the shared prototype,
+  // which would leak into every other test in the run.
+  afterEach(() => vi.restoreAllMocks());
+
+  const withResponse = (text) => {
+    vi.spyOn(BgIslFiscalPrinter.prototype, '_sendCommand')
+      .mockResolvedValue(Buffer.from(text, 'latin1'));
+    return new BgDatecsXIslFiscalPrinter({}, {}, {});
+  };
+
+  it('rejects a command whose result code is negative', async () => {
+    await expect(withResponse('-111005\t')._sendCommand(0x31, null))
+      .rejects.toThrow(/rejected command 0x31 with error code -111005/);
+  });
+
+  it('accepts a success code', async () => {
+    const resp = await withResponse('0\t9754\t')._sendCommand(0x38, null);
+    expect(resp.toString('latin1')).toBe('0\t9754\t');
+  });
+
+  it('does not mistake a device-info reply for an error', async () => {
+    // GetDeviceInfo answers with no result code at all; a blanket check here
+    // would make the device undetectable all over again.
+    const info = 'FP-700X,3.00 22Jul25 0922,2209,00000000,DT652532,79012510';
+    const resp = await withResponse(info)._sendCommand(0x5a, '1');
+    expect(resp.toString('latin1')).toBe(info);
+  });
+});
+
+describe('Datecs X tax groups', () => {
+  it('uses digits, not the Cyrillic letters the rest of the family uses', () => {
+    const x = new BgDatecsXIslFiscalPrinter({}, {}, {});
+    const p = new BgDatecsPIslFiscalPrinter({}, {}, {});
+    expect(x.getTaxGroupText(2)).toBe('2');
+    expect(p.getTaxGroupText(2)).toBe('Б');
+  });
+});
+
+describe('Datecs X receipt amount', () => {
+  const withResponse = (text) => {
+    const p = new BgDatecsXIslFiscalPrinter({}, {}, {});
+    p._sendCommand = async () => Buffer.from(text, 'latin1');
+    return p;
+  };
+
+  it('reads the total from the tab-separated reply', async () => {
+    // Captured live: code, isOpen, docNumber, items, total, paid.
+    expect(await withResponse('0\t1\t9754\t1\t0.01\t0.01\t')._getReceiptAmount()).toBe(0.01);
+  });
+
+  it('would have returned 0 under the base comma parser, disabling the guard', async () => {
+    // The settlement check skips when the amount is 0, so a wrong parse does not
+    // fail loudly — it silently removes the protection.
+    const p = new BgDatecsPIslFiscalPrinter({}, {}, {});
+    p._sendCommand = async () => Buffer.from('0\t1\t9754\t1\t0.01\t0.01\t', 'latin1');
+    expect(await p._getReceiptAmount()).toBe(0);
   });
 });

@@ -4,6 +4,7 @@ import { BgIslFiscalPrinter, CMD } from '../BgIslFiscalPrinter.js';
 import { DeviceInfo } from '../../Core/DeviceInfo.js';
 import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
 import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
+import { StandardizedStatusMessageException } from '../../Exceptions/StandardizedStatusMessageException.js';
 import {
   DeviceStatusWithDateTime,
   DeviceStatusWithCashAmount,
@@ -146,6 +147,77 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     return errors;
   }
 
+  /**
+   * Receipt total, read from 0x4C "T".
+   *
+   * This family answers tab-separated —
+   * `<code>\t<isOpen>\t<docNumber>\t<items>\t<total>\t<paid>\t` — while the base
+   * parser splits on commas and reads field 2. On an X device that never matches,
+   * so the base silently returned 0 and _assertReceiptSettled treated it as
+   * "nothing trustworthy to compare against" and skipped the check entirely. The
+   * guard that exists to stop an underpaid receipt being abandoned half-printed
+   * was therefore inert on exactly the family whose failures are hardest to see.
+   */
+  async _getReceiptAmount() {
+    try {
+      const resp = await this._sendCommand(CMD.GetReceiptStatus, 'T');
+      const fields = iconv.decode(resp || Buffer.alloc(0), 'cp1251').split('\t');
+      if (fields.length >= 5) {
+        const total = parseFloat(fields[4].trim());
+        return Number.isFinite(total) ? total : 0;
+      }
+    } catch (_) { /* never fail a good receipt because the probe failed */ }
+    return 0;
+  }
+
+  /**
+   * Tax groups are DIGITS on the X series, not the Cyrillic letters the rest of
+   * the ISL family uses. Sending "Б" where the device wants "2" is rejected with
+   * -111005, and because that code arrives in the response DATA while the status
+   * bytes stay healthy, the base driver saw a success: the receipt opened, every
+   * sale line was silently refused, and the close then failed because the receipt
+   * was empty. The paper showed a receipt that started and never finished.
+   */
+  getTaxGroupText(taxGroup) {
+    const map = {
+      [TaxGroup.TaxGroup1]: '1',
+      [TaxGroup.TaxGroup2]: '2',
+      [TaxGroup.TaxGroup3]: '3',
+      [TaxGroup.TaxGroup4]: '4',
+      [TaxGroup.TaxGroup5]: '5',
+      [TaxGroup.TaxGroup6]: '6',
+      [TaxGroup.TaxGroup7]: '7',
+      [TaxGroup.TaxGroup8]: '8',
+    };
+    return map[taxGroup] || map[TaxGroup.TaxGroup1];
+  }
+
+  /**
+   * Treat a negative code in field 0 of the response as a rejection.
+   *
+   * This family reports the COMMAND's outcome in the response data and the
+   * PRINTER's condition in the status bytes. The base driver only reads the
+   * status bytes, so a refused command looked like a success — the failure only
+   * surfaced later, as a receipt that would not close, by which point a document
+   * was already open on the device and the POS had been told the sale worked.
+   *
+   * Only a leading field of the form -NNNN is treated as an error: some commands
+   * (GetDeviceInfo among them) answer with data that has no result code at all.
+   */
+  async _sendCommand(cmd, data, retries, timeoutMs) {
+    const resp = await super._sendCommand(cmd, data, retries, timeoutMs);
+    const first = iconv.decode(resp || Buffer.alloc(0), 'cp1251').split('\t')[0].trim();
+    if (/^-\d+$/.test(first)) {
+      const rejection = new StandardizedStatusMessageException(
+        `Device rejected command 0x${cmd.toString(16)} with error code ${first}`
+      );
+      rejection.responseData = resp;
+      rejection.command = cmd;
+      throw rejection;
+    }
+    return resp;
+  }
+
   getDefaultOptions() {
     return {
       'Operator.ID': '1',
@@ -175,16 +247,40 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
       if (!e || !e.responseData) {
         throw e;
       }
-      const fields = iconv.decode(e.responseData, 'cp1251').split('\t');
+      const decoded = iconv.decode(e.responseData, 'cp1251');
+      const fields = decoded.split('\t');
       if (fields.length >= 2 && fields[0].trim() === '0' && fields[1].trim() !== '') {
         logger.warn(
           `CloseReceipt reported a printer condition but the receipt is in fiscal memory `
           + `(document ${fields[1].trim()}); treating as success: ${e.message}`
         );
-        return;
+        // Hand back the response: it carries the document number, and on this
+        // family there is no other way to read it.
+        return decoded;
       }
       throw e;
     }
+  }
+
+  /**
+   * The X series rejects GetLastDocumentNumber (0x71) with E402 "command code is
+   * invalid" — verified on an FP-700X, firmware 3.00. The number is field 1 of
+   * the close-receipt response instead.
+   *
+   * When this was left to the base implementation the receipt printed and closed
+   * correctly and only the follow-up 0x71 failed, so the POS reported the sale as
+   * failed while a valid fiscal document existed on paper and in fiscal memory —
+   * the worst way for this to go wrong, because the two records disagree and only
+   * the paper is right.
+   */
+  async _getLastDocumentNumber(closeResponse) {
+    const fields = String(closeResponse || '').split('\t');
+    if (fields.length < 2 || fields[1].trim() === '') {
+      throw new StandardizedStatusMessageException(
+        'E409 Wrong format of close receipt response; cannot read the document number'
+      );
+    }
+    return fields[1].trim();
   }
 
   // Protocol (no USN): {op}\t{pass}\t1\t\t
@@ -239,7 +335,7 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     // Protocol: {text}\t{taxCd}\t{price}\t{qty}\t{modType}\t{modValue}\t{dept}\t
     const str = [text, taxText, price,
       qty !== 0 ? String(qty) : '',
-      modType, modVal, dept > 0 ? String(dept) : '', ''].join('\t');
+      modType, modVal, String(dept), ''].join('\t');
     await this._sendCommand(CMD.FiscalReceiptSale, str);
   }
 

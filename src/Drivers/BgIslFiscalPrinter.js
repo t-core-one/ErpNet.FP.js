@@ -207,7 +207,12 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       // printed" when the printer had done nothing at all.
       if (sepIdx >= dataStart && sepIdx < postIdx) {
         const statusBytes = response.slice(sepIdx + 1, postIdx);
-        logger.debug(`cmd 0x${cmd.toString(16)} status=${statusBytes.toString('hex')} dataLen=${responseData.length}`);
+        // The payload matters as much as the status: on the Datecs X family the
+        // COMMAND's result is field 0 of the data (0 = ok, negative = an error
+        // code) while the status bytes only describe the PRINTER's condition.
+        // Logging only the status hid a failing close behind a healthy printer.
+        logger.debug(`cmd 0x${cmd.toString(16)} status=${statusBytes.toString('hex')} `
+          + `dataLen=${responseData.length} data=${JSON.stringify(iconv.decode(responseData, 'cp1251').slice(0, 120))}`);
         const errors = this.describeStatusErrors(statusBytes);
         if (errors.length) {
           // Do not retry: a rejection is deterministic, and re-sending a fiscal
@@ -470,7 +475,11 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   }
 
   async _closeReceipt() {
-    await this._sendCommand(CMD.CloseFiscalReceipt, null);
+    // The response matters: on the Datecs X series it carries the document
+    // number, which is the only place that number can be read from — that
+    // family rejects the separate GetLastDocumentNumber command outright.
+    const resp = await this._sendCommand(CMD.CloseFiscalReceipt, null);
+    return iconv.decode(resp || Buffer.alloc(0), 'cp1251');
   }
 
   async _getReceiptAmount() {
@@ -491,7 +500,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     return 0;
   }
 
-  async _getLastReceiptInfo() {
+  async _getLastReceiptInfo(closeResponse) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
       // FM serial is already known from device detection
@@ -506,13 +515,26 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
           parseInt(m[1], 10), parseInt(m[4], 10), parseInt(m[5], 10), parseInt(m[6], 10));
       }
 
-      // Get receipt number
-      const numResp = await this._sendCommand(CMD.GetLastDocumentNumber, null);
-      status.ReceiptNumber = iconv.decode(numResp || Buffer.alloc(0), 'cp1251').trim();
+      // Get receipt number. How that is obtained is family-specific, so it
+      // goes through a method the drivers can override.
+      status.ReceiptNumber = await this._getLastDocumentNumber(closeResponse);
     } catch (e) {
       status.addError('E010', e.message);
     }
     return status;
+  }
+
+  /**
+   * The number the device assigned to the document just closed.
+   *
+   * Most of the ISL family answers a dedicated command for this. The Datecs X
+   * series does not — it rejects 0x71 with "command code is invalid" and returns
+   * the number in the close-receipt response instead, so that driver overrides
+   * this and the close response is threaded through for it.
+   */
+  async _getLastDocumentNumber(_closeResponse) {
+    const numResp = await this._sendCommand(CMD.GetLastDocumentNumber, null);
+    return iconv.decode(numResp || Buffer.alloc(0), 'cp1251').trim();
   }
 
   async printReceipt(receipt) {
@@ -543,8 +565,8 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       }
       await this._assertReceiptSettled(receipt.Payments);
       const receiptAmount = await this._getReceiptAmount();
-      await this._closeReceipt();
-      const info = await this._getLastReceiptInfo();
+      const closeResponse = await this._closeReceipt();
+      const info = await this._getLastReceiptInfo(closeResponse);
       info.ReceiptAmount = receiptAmount;
       Object.assign(status, info);
     } catch (e) {
@@ -581,8 +603,8 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       }
       await this._assertReceiptSettled(reversalReceipt.Payments);
       const receiptAmount = await this._getReceiptAmount();
-      await this._closeReceipt();
-      const info = await this._getLastReceiptInfo();
+      const closeResponse = await this._closeReceipt();
+      const info = await this._getLastReceiptInfo(closeResponse);
       info.ReceiptAmount = receiptAmount;
       Object.assign(status, info);
     } catch (e) {
