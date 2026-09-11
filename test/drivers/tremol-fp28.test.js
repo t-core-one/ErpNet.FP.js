@@ -22,6 +22,11 @@ const ACK_ERR_12  = hex('06 25 31 32 32 36 0a'); //                        -> ER
 // A data frame (GetStatus), which the shared parser must keep handling.
 const DATA_STATUS = hex('02 2a 21 20 80 80 80 f0 a1 80 80 3f 3a 0a');
 
+// GetStatus (0x20) payloads, both captured from ZK212247: the only difference
+// between a healthy device and one with the paper cover open is byte 1 bit 0.
+const STATUS_HEALTHY    = Buffer.from([0x80, 0x80, 0x80, 0xf0, 0xa1, 0x80, 0x80]);
+const STATUS_COVER_OPEN = Buffer.from([0x80, 0x81, 0x80, 0xf0, 0xa1, 0x80, 0x80]);
+
 // Device-info payloads, as decoded from cp1251.
 const VERSION = '2;866;30-06-2025 08:00;TREMOL FP28; Вер.1.04 TRP28 К.С.E7F4;';
 const TAX     = '204017166    ;0;4972208;03-09-2026 15:34;';
@@ -138,5 +143,51 @@ describe('the shared ZFP base is unaffected', () => {
     expect(owns(BgTremolFp28ZfpFiscalPrinter)).toBe(true);
     expect(owns(BgTremolZfpFiscalPrinter)).toBe(false);
     expect(owns(BgTremolZfpV2FiscalPrinter)).toBe(false);
+  });
+});
+
+describe('BgTremolFp28ZfpFiscalPrinter — checkStatus', () => {
+  const withDevice = (statusBytes, clock) => {
+    const printer = new BgTremolFp28ZfpFiscalPrinter(channel('status'), null);
+    vi.spyOn(printer, '_sendCommand').mockImplementation(async cmd => {
+      if (cmd === CMD.GetStatus) return statusBytes;
+      if (cmd === CMD.GetDateTime) return Buffer.from(clock, 'latin1');
+      return Buffer.alloc(0);
+    });
+    return printer;
+  };
+
+  it('reports a healthy device as Ok despite the always-set informational bits', async () => {
+    const status = await withDevice(STATUS_HEALTHY, '11-09-2026 15:02').checkStatus();
+    expect(status.Ok).toBe(true);
+    expect(status.Messages).toEqual([]);
+  });
+
+  it('fails closed when the paper cover is open', async () => {
+    const status = await withDevice(STATUS_COVER_OPEN, '11-09-2026 15:02').checkStatus();
+    expect(status.Ok).toBe(false);
+    expect(status.Messages.map(m => m.Text)).toContain('paper cover open or out of paper');
+  });
+
+  it('parses this firmware\'s HH:MM clock, which the shared pattern never matched', async () => {
+    const status = await withDevice(STATUS_HEALTHY, '11-09-2026 15:02').checkStatus();
+    expect(status.DeviceDateTime).toBeInstanceOf(Date);
+    expect(status.DeviceDateTime.getFullYear()).toBe(2026);
+    expect(status.DeviceDateTime.getMonth()).toBe(8); // September
+    expect(status.DeviceDateTime.getDate()).toBe(11);
+    expect(status.DeviceDateTime.getHours()).toBe(15);
+    expect(status.DeviceDateTime.getMinutes()).toBe(2);
+  });
+
+  it('still parses a clock that does carry seconds', async () => {
+    const status = await withDevice(STATUS_HEALTHY, '11-09-2026 15:02:37').checkStatus();
+    expect(status.DeviceDateTime.getSeconds()).toBe(37);
+  });
+
+  it('fails closed when the device will not answer at all', async () => {
+    const printer = new BgTremolFp28ZfpFiscalPrinter(channel('dead'), null);
+    vi.spyOn(printer, '_sendCommand').mockRejectedValue(new Error('no response'));
+    const status = await printer.checkStatus();
+    expect(status.Ok).toBe(false);
   });
 });

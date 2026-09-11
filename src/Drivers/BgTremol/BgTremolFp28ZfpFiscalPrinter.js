@@ -33,6 +33,7 @@
 import iconv from 'iconv-lite';
 import { BgZfpFiscalPrinter, CMD } from '../BgZfp/BgZfpFiscalPrinter.js';
 import { DeviceInfo } from '../../Core/DeviceInfo.js';
+import { DeviceStatusWithDateTime } from '../../Core/DeviceStatus.js';
 import { FiscalPrinterDriver } from '../../Core/FiscalPrinterDriver.js';
 import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoException.js';
 import { InvalidResponseException } from '../../Exceptions/InvalidResponseException.js';
@@ -43,6 +44,21 @@ const ACK = 0x06;
 const ETX = 0x0A;
 // Shortest well-formed ACK frame: ACK SEQ ERR ERR CS CS ETX -> ETX at ackIdx+6.
 const MIN_ACK_FRAME = 6;
+/**
+ * Hard failures in the FP-28 status field, as [byteIndex, bit, message].
+ *
+ * DELIBERATELY CONSERVATIVE, in the spirit of the ISL table. Each status byte
+ * carries 0x80 as a marker plus 7 flag bits, and a healthy FP-28 answers
+ *     80 80 80 f0 a1 80 80
+ * so bytes 3 and 4 already have several bits set as ordinary informational
+ * state. Treating "any bit set" as a fault would fail every operation. Only
+ * bits observed to change with a real fault are listed: opening the paper cover
+ * on ZK212247 flipped byte 1 bit 0 and left every other bit untouched.
+ */
+const STATUS_ERROR_BITS = [
+  [1, 0, 'paper cover open or out of paper'],
+];
+
 const MODEL_RE = /FP-?28/i;
 const SERIAL_RE = /^[A-Z]{2}[0-9]{6}$/;
 
@@ -86,6 +102,46 @@ export class BgTremolFp28ZfpFiscalPrinter extends BgZfpFiscalPrinter {
       `FP-28 rejected ZFP command 0x${cmd.toString(16).toUpperCase().padStart(2, '0')} `
       + `with error code ${errCode}`
     );
+  }
+
+  /**
+   * A readiness check that actually reads the device.
+   *
+   * The shared implementation only asks the clock, so it answers Ok for a device
+   * that physically cannot print. plana_pos_fiscal uses this as its pre-payment
+   * gate, so a cashier could finalise a sale, mint the УНП and get no receipt —
+   * the check failed open. ISL escapes this because its status bytes ride every
+   * response frame; ZFP carries none, so the condition has to be asked for
+   * explicitly with GetStatus (0x20).
+   */
+  async checkStatus() {
+    const status = new DeviceStatusWithDateTime();
+    try {
+      const raw = await this._sendCommand(CMD.GetStatus, null);
+      const bytes = [...(raw || Buffer.alloc(0))];
+      for (const [idx, bit, message] of STATUS_ERROR_BITS) {
+        if (idx < bytes.length && (bytes[idx] & 0x7f) & (1 << bit)) {
+          status.addError('E004', message);
+        }
+      }
+    } catch (e) {
+      status.addError('E001', e.message);
+    }
+    try {
+      const resp = await this._sendCommand(CMD.GetDateTime, null);
+      const str = iconv.decode(resp || Buffer.alloc(0), 'cp1251').trim();
+      // This firmware answers "11-09-2026 15:02" — no seconds — which the shared
+      // HH:MM:SS pattern never matched, leaving DeviceDateTime null on every call.
+      const m = str.match(/(\d{2})[-./](\d{2})[-./](\d{2,4})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+      if (m) {
+        const yr = m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10);
+        status.DeviceDateTime = new Date(yr, parseInt(m[2], 10) - 1, parseInt(m[1], 10),
+          parseInt(m[4], 10), parseInt(m[5], 10), parseInt(m[6] || '0', 10));
+      }
+    } catch (e) {
+      status.addError('E001', e.message);
+    }
+    return status;
   }
 
   /** As the base, plus the raw ReadFDNumbers response the FP-28 needs for its serial. */
