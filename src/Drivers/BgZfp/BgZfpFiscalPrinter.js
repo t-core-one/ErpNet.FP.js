@@ -121,6 +121,21 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     ]);
   }
 
+  /**
+   * Interpret a response shape the shared parser does not know.
+   *
+   * Returns null here, so the framing below stays exactly what it has always
+   * been for every existing ZFP device. A model-specific subclass overrides
+   * this when its firmware answers in a shape the shared parser would discard
+   * — see BgTremolFp28ZfpFiscalPrinter, whose FP-28 firmware replies to
+   * execute-only commands with a bare ACK frame rather than a data frame.
+   *
+   * @returns {null|{data: Buffer}|{retry: true}} null => not handled here
+   */
+  _interpretResponse(response, cmd) {  // eslint-disable-line no-unused-vars
+    return null;
+  }
+
   async _sendCommand(cmd, data, retries = 3) {
     const seq = this._nextSeq();
     const frame = this._buildHostFrame(seq, cmd, data);
@@ -140,6 +155,13 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
       }
 
       if (!response || response.length === 0) continue;
+
+      // Model-specific shapes first; a no-op unless a subclass opts in.
+      const alt = this._interpretResponse(response, cmd);
+      if (alt) {
+        if (alt.retry) continue;
+        return alt.data;
+      }
 
       const stxIdx = response.indexOf(STX);
       const etxIdx = response.lastIndexOf(ETX);

@@ -15,6 +15,7 @@ import { BgIncotexIslFiscalPrinterDriver } from './Drivers/BgIncotex/BgIncotexIs
 import { BgIslIcpFiscalPrinterDriver } from './Drivers/BgIsl/BgIslIcpFiscalPrinter.js';
 import { BgTremolZfpFiscalPrinterDriver } from './Drivers/BgTremol/BgTremolZfpFiscalPrinter.js';
 import { BgTremolZfpV2FiscalPrinterDriver } from './Drivers/BgTremol/BgTremolZfpV2FiscalPrinter.js';
+import { BgTremolFp28ZfpFiscalPrinterDriver } from './Drivers/BgTremol/BgTremolFp28ZfpFiscalPrinter.js';
 import { BgSisJsonFiscalPrinterDriver } from './Drivers/BgSis/BgSisJsonFiscalPrinterDriver.js';
 import { HttpTransport } from './Transports/HttpTransport.js';
 
@@ -66,6 +67,10 @@ export class ServiceSingleton extends ServiceController {
     const islIcp      = new BgIslIcpFiscalPrinterDriver();
     const tremolZfp   = new BgTremolZfpFiscalPrinterDriver();
     const tremolV2Zfp = new BgTremolZfpV2FiscalPrinterDriver();
+    // Registered after the generic Tremol drivers: those reject an FP-28 during
+    // detection anyway (its Version response has no ZK serial and no V2 model),
+    // and this one claims nothing but an FP-28.
+    const tremolFp28  = new BgTremolFp28ZfpFiscalPrinterDriver();
     const sisJson     = new BgSisJsonFiscalPrinterDriver();
 
     this._provider = new Provider(this._configOptions)
@@ -87,6 +92,8 @@ export class ServiceSingleton extends ServiceController {
       .register(tremolZfp,   tcpTransport)
       .register(tremolV2Zfp, comTransport)
       .register(tremolV2Zfp, tcpTransport)
+      .register(tremolFp28,  comTransport)
+      .register(tremolFp28,  tcpTransport)
       .register(sisJson,     httpTransport);
   }
 
