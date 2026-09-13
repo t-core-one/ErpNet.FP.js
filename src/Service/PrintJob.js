@@ -1,6 +1,7 @@
 export const PrintJobAction = Object.freeze({
   None: 'None',
   Cash: 'Cash',
+  Status: 'Status',
   RawRequest: 'RawRequest',
   Receipt: 'Receipt',
   ReversalReceipt: 'ReversalReceipt',
@@ -33,6 +34,7 @@ export class PrintJob {
     const doc = this.document;
 
     switch (this.action) {
+      case PrintJobAction.Status:          return p.checkStatus();
       case PrintJobAction.Cash:            return p.cash();
       case PrintJobAction.RawRequest:      return p.rawRequest(doc);
       case PrintJobAction.Receipt:         return p.printReceipt(doc);

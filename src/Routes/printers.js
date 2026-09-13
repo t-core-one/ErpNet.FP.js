@@ -51,7 +51,14 @@ router.get('/:id/status', async (req, res) => {
   const printer = service.printers[req.params.id];
   if (!printer) return res.status(404).json({ error: 'Printer not found' });
   try {
-    const status = await printer.checkStatus();
+    // Through the queue like every other device operation. Called directly, this
+    // route wrote to the port while a fiscal command was reading it — the POS
+    // polls it regularly, so it is a second source of the same collision the
+    // keep-alive caused.
+    const status = await service.runAsync(new PrintJob({
+      printer, action: PrintJobAction.Status, document: null,
+      asyncTimeout: DEFAULT_TIMEOUT,
+    }));
     res.json(status);
   } catch (e) {
     res.status(500).json({ error: e.message });

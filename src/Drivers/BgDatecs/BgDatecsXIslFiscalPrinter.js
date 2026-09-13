@@ -80,6 +80,7 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     // This family's LEN and CMD are four bytes each, not one, so the payload
     // starts ten bytes past the preamble instead of four.
     this.responseHeaderLength = 10;
+    this.statusLength = 8;
 
     this.paymentTypeMappings = {
       [PaymentType.Cash]: '0',

@@ -85,6 +85,10 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     // the wider LEN and CMD fields its frame builder writes.
     this.responseHeaderLength = 4;
 
+    // Width of the status field between SEPARATOR and POSTAMBLE. Six in this
+    // dialect; the Datecs X series reports eight.
+    this.statusLength = 6;
+
     this.paymentTypeMappings = {
       [PaymentType.Cash]: '0',
       [PaymentType.Check]: '1',
@@ -162,6 +166,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     ]);
   }
 
+
   async _sendCommand(cmd, data, retries = 3, timeoutMs = 5000) {
     const seq = this._nextSeq();
     const frameData = data instanceof Buffer ? data :
@@ -189,15 +194,21 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       const termIdx = response.lastIndexOf(TERMINATOR);
       if (preIdx < 0 || termIdx <= preIdx) continue;
 
-      const postIdx = response.lastIndexOf(POSTAMBLE, termIdx);
-      if (postIdx < 0) continue;
-
       // Response: PREAMBLE | LEN | SEQ | CMD_ECHO | data | SEPARATOR | status | POSTAMBLE
       // data starts right after CMD_ECHO, ends at SEPARATOR. The header is four
       // bytes in this dialect, but the Datecs X series widens LEN and CMD to
       // four bytes each, so the offset is a property rather than a constant.
       const dataStart = preIdx + this.responseHeaderLength;
       const sepIdx = response.indexOf(SEPARATOR, dataStart);
+
+      // Take the FIRST postamble at or after the separator, not the last one
+      // before the terminator. If two frames ever land in the buffer together,
+      // the old pairing spanned both of them and produced a "status" field made
+      // of one frame's status, a terminator, and the whole of the next frame.
+      const postIdx = sepIdx >= dataStart
+        ? response.indexOf(POSTAMBLE, sepIdx)
+        : response.lastIndexOf(POSTAMBLE, termIdx);
+      if (postIdx < 0 || postIdx > termIdx) continue;
       const dataEnd = (sepIdx >= dataStart && sepIdx < postIdx) ? sepIdx : postIdx;
       const responseData = dataStart < dataEnd ? response.slice(dataStart, dataEnd) : Buffer.alloc(0);
 
@@ -207,6 +218,14 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       // printed" when the printer had done nothing at all.
       if (sepIdx >= dataStart && sepIdx < postIdx) {
         const statusBytes = response.slice(sepIdx + 1, postIdx);
+        // A status field of the wrong width means the frame is malformed or two
+        // replies were concatenated. Retry rather than decode it: a 40-byte
+        // "status" was logged as if it were real for the one collision we had.
+        if (statusBytes.length !== this.statusLength) {
+          logger.warn(`cmd 0x${cmd.toString(16)}: discarding malformed response, `
+            + `status field is ${statusBytes.length} bytes, expected ${this.statusLength}`);
+          continue;
+        }
         // The payload matters as much as the status: on the Datecs X family the
         // COMMAND's result is field 0 of the data (0 = ok, negative = an error
         // code) while the status bytes only describe the PRINTER's condition.

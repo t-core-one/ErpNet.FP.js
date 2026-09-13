@@ -11,10 +11,13 @@ const TERMINATOR = 0x03;
 function buildResponse(text = '', withSeparator = false) {
   const data = Buffer.from(text, 'binary');
   const parts = [
-    Buffer.from([PREAMBLE, 0x20 + 4 + data.length + (withSeparator ? 2 : 0), 0x21, 0x30]),
+    Buffer.from([PREAMBLE, 0x20 + 4 + data.length + (withSeparator ? 7 : 0), 0x21, 0x30]),
     data,
   ];
-  if (withSeparator) parts.push(Buffer.from([SEPARATOR, 0x00])); // status = no error
+  // A real ISL status field is SIX bytes — this is the healthy FP-800 baseline
+  // captured from the device. It used to be a single 0x00 here, which no device
+  // ever sends, and that hid the fact that the parser accepted any width.
+  if (withSeparator) parts.push(Buffer.from([SEPARATOR, 0x88, 0x80, 0x80, 0xea, 0x86, 0x9a]))
   parts.push(Buffer.from([POSTAMBLE, 0x30, 0x30, 0x30, 0x30, TERMINATOR]));
   return Buffer.concat(parts);
 }
