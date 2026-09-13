@@ -1,5 +1,7 @@
 import { SerialPort } from 'serialport';
 import { Transport } from '../Core/Transport.js';
+import { ReceiveBuffer } from './ReceiveBuffer.js';
+import { throwIfAbandoned } from '../Exceptions/ProbeAbandonedError.js';
 
 const DEFAULT_BAUD_RATE = 115200;
 const READ_TIMEOUT_MS = 500;
@@ -9,8 +11,7 @@ export class ComChannel {
     this._portPath = portPath;
     this._baudRate = baudRate;
     this._port = null;
-    this._buffer = Buffer.alloc(0);
-    this._listenerAttached = false;
+    this._rx = new ReceiveBuffer(READ_TIMEOUT_MS);
     this._disposed = false;
   }
 
@@ -24,6 +25,10 @@ export class ComChannel {
    * so it would re-open the port *after* cleanup and leak the lock forever (every
    * later probe then fails with "Cannot lock port", until the service restarts).
    * Once disposed the channel refuses to re-open, so stragglers die instead.
+   *
+   * Since leases arrived this is the blunt instrument of last resort: it kills a
+   * channel nobody detected anything on. Revoking a lease is the per-probe tool,
+   * and leaves the channel perfectly usable for the next driver.
    */
   async dispose() {
     this._disposed = true;
@@ -41,23 +46,38 @@ export class ComChannel {
     await new Promise((resolve, reject) => {
       this._port.open(err => err ? reject(err) : resolve());
     });
-    if (!this._listenerAttached) {
-      this._port.on('data', data => {
-        this._buffer = Buffer.concat([this._buffer, data]);
-      });
-      this._listenerAttached = true;
-    }
+    // Attach unconditionally: we only get here having just constructed a BRAND
+    // NEW SerialPort, so this runs exactly once per port object.
+    //
+    // This used to be guarded by a _listenerAttached flag that was cleared only
+    // in close(). When the port closed ITSELF — USB re-enumeration, the printer
+    // power-cycled, a serialport 'close'/'error' — no close() ran, the flag
+    // stayed true, and the next open() built a new port with no accumulator on
+    // it. Nothing ever reached the receive buffer again: every read() returned
+    // empty, i.e. a silently dead channel that only a service restart fixed.
+    // With no flag there is no state to go stale.
+    this._port.on('data', data => this._rx.push(data));
   }
 
-  close() {
+  async close() {
+    // Release anybody parked on a read before the port goes away rather than
+    // leaving them to their timeout, and drop bytes belonging to a port that no
+    // longer exists.
+    this._rx.reset();
     if (this._port && this._port.isOpen) {
-      return new Promise((resolve) => this._port.close(resolve));
+      await new Promise((resolve) => this._port.close(resolve));
     }
-    return Promise.resolve();
   }
 
-  async write(data) {
+  /**
+   * @param {Buffer} data
+   * @param {AbortSignal} [signal] the caller's lease; an abandoned probe must
+   *   not put another frame on the wire, so this is checked before open() too.
+   */
+  async write(data, signal) {
+    throwIfAbandoned(signal);
     await this.open();
+    throwIfAbandoned(signal);
     await new Promise((resolve, reject) => {
       this._port.write(data, err => err ? reject(err) : resolve());
     });
@@ -66,26 +86,19 @@ export class ComChannel {
     });
   }
 
-  async read() {
-    if (this._buffer.length > 0) {
-      const data = this._buffer;
-      this._buffer = Buffer.alloc(0);
-      return data;
-    }
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this._port.off('data', onData);
-        resolve(Buffer.alloc(0));
-      }, READ_TIMEOUT_MS);
-      const onData = () => {
-        clearTimeout(timer);
-        this._port.off('data', onData);
-        const data = this._buffer;
-        this._buffer = Buffer.alloc(0);
-        resolve(data);
-      };
-      this._port.once('data', onData);
-    });
+  /**
+   * Wait for the device's bytes. The queue lives in ReceiveBuffer: there is no
+   * per-read 'data' listener any more, so two pending reads cannot take the
+   * buffer from each other, and a revoked lease's read rejects at once instead
+   * of quietly consuming somebody else's answer.
+   */
+  read(signal) {
+    return this._rx.take(signal);
+  }
+
+  /** Drop buffered bytes — see ReceiveBuffer.purge for why, and who calls it. */
+  purgeInput() {
+    this._rx.purge();
   }
 }
 

@@ -126,20 +126,32 @@ export class BgDaisyIslFiscalPrinterDriver extends FiscalPrinterDriver {
     const printer = new BgDaisyIslFiscalPrinter(channel, serviceOptions, options);
     const cacheKey = `isl.${channel.descriptor}.${DRIVER_NAME}`;
 
+    // Cache the RAW answers and re-parse, like every other driver. Storing the
+    // DeviceInfo object handed the very same instance to every printer built
+    // from a cache hit, and Provider then writes Uri into it — so two Daisy
+    // devices detected inside the 30s window ended up sharing one DeviceInfo and
+    // the second one's Uri overwrote the first's.
     const cached = this.cache.get(cacheKey);
-    if (cached) {
-      printer.info = cached;
-      printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
-      if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
-      return printer;
+    let raw = cached;
+    if (!raw) {
+      // Sequential, NOT Promise.all. Two commands in flight on one half-duplex
+      // channel is the same race as two probes: both reads wait on one receive
+      // buffer, and even with the FIFO in place each reply goes to whichever
+      // read is parked first, not to the command it answers. This driver raced
+      // itself on every single probe.
+      const rawDeviceInfo = await printer.getRawDeviceInfo();
+      const rawConstants = await printer.getRawDeviceConstants();
+      raw = { rawDeviceInfo, rawConstants };
+      this.cache.store(cacheKey, raw, 30000);
     }
 
-    const [rawDeviceInfo, rawConstants] = await Promise.all([
-      printer.getRawDeviceInfo(),
-      printer.getRawDeviceConstants(),
-    ]);
-    printer.info = parseDeviceInfo(rawDeviceInfo, rawConstants, autoDetect);
-    this.cache.store(cacheKey, printer.info, 30000);
+    // One place that builds info, so a cache hit and a fresh probe cannot drift
+    // apart. They did: the cache-hit branch never set SupportsSubTotalAmountModifiers
+    // itself and got away with it only because it was handed the SAME object the
+    // fresh branch had already mutated. Re-parsing per printer (which is what
+    // stops two devices sharing one DeviceInfo) would have quietly turned
+    // subtotal modifiers off on every cache hit.
+    printer.info = parseDeviceInfo(raw.rawDeviceInfo, raw.rawConstants, autoDetect);
     printer.info.SupportedPaymentTypes = printer.getSupportedPaymentTypes();
     printer.info.SupportsSubTotalAmountModifiers = true;
     if (serviceOptions) serviceOptions.reconfigurePrinterConstants(printer.info);
