@@ -12,25 +12,44 @@ const DAILY = '0;       0.02;       0.00;       0.00;       0.00;       0.00;   
             + '       0.00;       0.00;       0.00;       0.00;       0.00;       0.00;';
 
 describe('cash in drawer', () => {
-  const withResponse = text => {
+  // Both captured from an FP-28. Report 0 field 1 is sales + deposits -
+  // withdrawals; report 1 fields 6 and 7 are the storno count and total.
+  const withReports = (r0, r1) => {
     const p = new BgTremolZfpFiscalPrinter(channel, null);
-    vi.spyOn(p, '_sendCommand').mockResolvedValue(iconv.encode(text, 'cp1251'));
+    vi.spyOn(p, '_sendCommand').mockImplementation(async (_cmd, data) => {
+      const opt = data ? iconv.decode(data, 'cp1251') : '0';
+      return iconv.encode(opt === '1' ? r1 : r0, 'cp1251');
+    });
     return p;
   };
+  const NO_STORNO = '1;3;0;0.00;0;0.00;0;0.00;';
+  const ONE_STORNO = '1;3;0;0.00;0;0.00;1;0.01;';
 
   it('reads the amount from field 1 of the semicolon-separated answer', async () => {
-    const s = await withResponse(DAILY).cash();
+    const s = await withReports(DAILY, NO_STORNO).cash();
     expect(s.Ok).toBe(true);
     // Splitting on ',' and taking field 0 read the leading flag, so this was 0.
     expect(s.Amount).toBe(0.02);
   });
 
+  it('nets refunds off, because the device does not', async () => {
+    // ZK212247: 0.03 taken across three sales, one 0.01 storno paid back out.
+    const s = await withReports('0;0.03;0.00;', ONE_STORNO).cash();
+    expect(s.Amount).toBe(0.02);
+  });
+
+  it('reports an empty drawer when a sale has been fully reversed', async () => {
+    // ZK212244: one 0.01 sale, reversed. The device still reports 0.01.
+    const s = await withReports('0;0.01;0.00;', ONE_STORNO).cash();
+    expect(s.Amount).toBe(0);
+  });
+
   it('treats a value without a decimal point as stotinki', async () => {
-    expect((await withResponse('0;2;0;0;').cash()).Amount).toBe(0.02);
+    expect((await withReports('0;2;0;0;', NO_STORNO).cash()).Amount).toBe(0.02);
   });
 
   it('reports a malformed answer instead of silently returning zero', async () => {
-    const s = await withResponse('garbage').cash();
+    const s = await withReports('garbage', NO_STORNO).cash();
     expect(s.Ok).toBe(false);
     expect(s.Messages.map(m => m.Code)).toContain('E409');
   });

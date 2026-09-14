@@ -99,6 +99,13 @@ export function parseQrDateTime(dateStr, timeStr) {
   return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
+/** Device amounts carry a decimal point, or are whole stotinki when they do not. */
+function parseAmount(field) {
+  const v = String(field || '').trim();
+  if (!v) return 0;
+  return v.includes('.') ? (parseFloat(v) || 0) : ((parseInt(v, 10) || 0) / 100);
+}
+
 export class BgZfpFiscalPrinter extends BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
@@ -271,25 +278,46 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     return status;
   }
 
+  /** One report from ReadDailyAmounts, split into trimmed fields. */
+  async _readDailyAmounts(option) {
+    const resp = await this._sendCommand(CMD.ReadDailyAmounts, iconv.encode(option, 'cp1251'));
+    return iconv.decode(resp || Buffer.alloc(0), 'cp1251').split(';').map(f => f.trim());
+  }
+
   async cash() {
     const status = new DeviceStatusWithCashAmount();
     try {
-      const resp = await this._sendCommand(CMD.ReadDailyAmounts, iconv.encode('0', 'cp1251'));
-      const str = iconv.decode(resp, 'cp1251');
+      const parts = await this._readDailyAmounts('0');
       // The device answers semicolon-separated, and the cash amount is field 1;
       // field 0 is a leading flag. Splitting on ',' left one field whose
       // parseFloat is the flag, so the drawer always read 0 — and the POS checks
       // a withdrawal against this before allowing it.
-      const parts = str.split(';');
       if (parts.length < 3) {
-        status.addError('E409', `Invalid cash response format: "${str.trim()}"`);
-      } else {
-        const amount = parts[1].trim();
-        // Some firmwares answer in whole stotinki when there is no decimal point.
-        status.Amount = amount.includes('.')
-          ? (parseFloat(amount) || 0)
-          : ((parseInt(amount, 10) || 0) / 100);
+        status.addError('E409', `Invalid cash response format: "${parts.join(';')}"`);
+        return status;
       }
+      const sales = parseAmount(parts[1]);
+
+      // Report 0 field 1 is sales + deposits - withdrawals. Measured on two
+      // FP-28s: a 0.05 deposit raised it to 0.06 and the matching withdrawal put
+      // it back, but a storno never moves it. So it overstates the drawer by
+      // whatever has been refunded, and the POS checks a cash withdrawal against
+      // this figure before permitting it.
+      //
+      // Report 1 fields 6 and 7 are the storno count and total (1 and 0.01 on
+      // both devices, each of which had had exactly one 0.01 storno).
+      //
+      // ASSUMPTION, and the reason this is not simply protocol: field 7 is an
+      // aggregate across payment types, while field 1 above is cash only. So
+      // subtracting it is exact only while refunds are paid out in cash. In this
+      // trade they effectively always are — nothing in core POS or in the Odoo
+      // module forces it, but a refund is handed over as notes even when the sale
+      // was a card payment. Should someone refund to a card, this under-reports
+      // the cash on hand, which is the safe direction for a withdrawal check, and
+      // the operator reconciles against the counted drawer at session close.
+      const stornoParts = await this._readDailyAmounts('1');
+      const stornoTotal = stornoParts.length > 7 ? parseAmount(stornoParts[7]) : 0;
+      status.Amount = Math.round((sales - stornoTotal) * 100) / 100;
     } catch (e) {
       status.addError('E003', e.message);
     }
