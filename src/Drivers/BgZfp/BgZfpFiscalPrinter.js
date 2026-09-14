@@ -63,6 +63,42 @@ class FrameBuilder {
   }
 }
 
+/**
+ * The date and time out of the last-receipt QR data.
+ *
+ * An FP-28 answers ISO — "2026-09-14" and "11:11:41". Only the compact
+ * "DDMMYY"/"HHMMSS" shape was handled, and slicing an ISO string by position
+ * yields month 25 and a NaN year, i.e. an Invalid Date. That serialises to
+ * null, so the caller stored no receipt time at all — and a later storno then
+ * sent an EMPTY date field to the device, which faults it. Both shapes are
+ * accepted; anything else returns null rather than an Invalid Date, so a
+ * missing time is detectable instead of silently poisoning a later reversal.
+ */
+export function parseQrDateTime(dateStr, timeStr) {
+  const d = String(dateStr || '').trim();
+  const t = String(timeStr || '').trim();
+  let yr, mon, day;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+  if (iso) {
+    yr = +iso[1]; mon = +iso[2]; day = +iso[3];
+  } else if (/^\d{6}$/.test(d)) {
+    day = +d.slice(0, 2); mon = +d.slice(2, 4); yr = 2000 + +d.slice(4, 6);
+  } else {
+    return null;
+  }
+  let hh = 0, mm = 0, ss = 0;
+  const colon = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(t);
+  if (colon) {
+    hh = +colon[1]; mm = +colon[2]; ss = +(colon[3] || 0);
+  } else if (/^\d{6}$/.test(t)) {
+    hh = +t.slice(0, 2); mm = +t.slice(2, 4); ss = +t.slice(4, 6);
+  } else if (t) {
+    return null;
+  }
+  const dt = new Date(yr, mon - 1, day, hh, mm, ss);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 export class BgZfpFiscalPrinter extends BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
@@ -266,11 +302,27 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     const usn = receipt.UniqueSaleNumber || '';
     let fields;
     if (isReversal && reversalReceipt) {
+      // Refuse an incomplete reference instead of sending the device an empty
+      // field where the protocol wants a fixed shape. An empty date here is not
+      // a soft error on an FP-28 — the firmware faults and the device restarts
+      // mid-transaction, so this has to be caught before anything is written.
+      const missing = [];
+      if (!reversalReceipt.ReceiptNumber) missing.push('receiptNumber');
+      if (!reversalReceipt.FiscalMemorySerialNumber) missing.push('fiscalMemorySerialNumber');
+      const refDate = reversalReceipt.ReceiptDateTime
+        ? new Date(reversalReceipt.ReceiptDateTime) : null;
+      if (!refDate || Number.isNaN(refDate.getTime())) missing.push('receiptDateTime');
+      if (missing.length) {
+        throw new InvalidResponseException(
+          'Cannot storno without a complete reference to the original receipt: '
+          + `missing ${missing.join(', ')}. The device faults on an incomplete `
+          + 'reversal header, so nothing was sent to it.'
+        );
+      }
       // <OperNum>;<OperPass>;<ReceiptFormat>;<PrintVAT>;<StornoRcpPrintType>;
       // <StornoReason>;<RelatedToRcpNum>;<RelatedToRcpDateTime "DD-MM-YY HH:MM:SS">;
       // <FMNum>{;<RelatedToURN>}
-      const dt = reversalReceipt.ReceiptDateTime
-        ? this._formatReversalDateTime(new Date(reversalReceipt.ReceiptDateTime)) : '';
+      const dt = this._formatReversalDateTime(refDate);
       fields = [op, pass, '1', '1', 'D',
         this.getReversalReasonText(reversalReceipt.Reason),
         reversalReceipt.ReceiptNumber || '',
@@ -348,17 +400,7 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
       if (parts.length >= 4) {
         status.FiscalMemorySerialNumber = parts[0];
         status.ReceiptNumber = parts[1];
-        const dateStr = parts[2];
-        const timeStr = parts[3];
-        if (dateStr.length >= 6) {
-          const day = parseInt(dateStr.slice(0, 2), 10);
-          const mon = parseInt(dateStr.slice(2, 4), 10) - 1;
-          const yr = 2000 + parseInt(dateStr.slice(4, 6), 10);
-          const hh = timeStr.length >= 6 ? parseInt(timeStr.slice(0, 2), 10) : 0;
-          const mm = timeStr.length >= 6 ? parseInt(timeStr.slice(2, 4), 10) : 0;
-          const ss = timeStr.length >= 6 ? parseInt(timeStr.slice(4, 6), 10) : 0;
-          status.ReceiptDateTime = new Date(yr, mon, day, hh, mm, ss);
-        }
+        status.ReceiptDateTime = parseQrDateTime(parts[2], parts[3]);
         if (parts.length >= 5) status.ReceiptAmount = parseFloat(parts[4]) || 0;
       }
     } catch (e) {
