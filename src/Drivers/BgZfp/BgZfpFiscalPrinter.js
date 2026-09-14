@@ -323,14 +323,12 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     if (!reversalReceipt.FiscalMemorySerialNumber) {
       status.addError('E405', 'FiscalMemorySerialNumber of the original receipt is empty');
     }
-    // The device reverses the original amounts itself; a payments array here is
-    // ignored by the protocol, so drop it rather than send lines that mean
-    // nothing. Warn so a caller sending them can see why they vanished.
-    if (reversalReceipt.Payments && reversalReceipt.Payments.length) {
-      status.addWarning('W302',
-        'Reversal payments are ignored by the device and have been dropped.');
-      reversalReceipt.Payments = [];
-    }
+    // Payments are deliberately NOT dropped here. The reference implementation
+    // clears them, saying the device ignores them — that is not true of FP-28
+    // firmware 1.04. Without a payment line the storno carries an unpaid
+    // balance and CloseReceipt (0x38) refuses it with error 42, leaving a
+    // half-printed document. Verified both ways on real hardware: a storno with
+    // the payment line closes, the same storno without it does not.
     return status;
   }
 

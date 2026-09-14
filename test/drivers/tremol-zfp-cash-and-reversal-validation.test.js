@@ -65,12 +65,17 @@ describe('Tremol reversal validation', () => {
     expect(printer.validateReversalReceipt({ ...base(), FiscalMemorySerialNumber: '' }).Ok).toBe(false);
   });
 
-  it('drops payment lines with a warning, without failing the storno', () => {
+  it('keeps the payment line — the device needs it to close the storno', () => {
+    // The reference implementation clears reversal payments, saying the device
+    // ignores them. FP-28 firmware 1.04 does not: with no payment line the
+    // storno has an unpaid balance and CloseReceipt (0x38) refuses it with
+    // error 42, leaving a half-printed document on the paper. Observed on
+    // ZK212244 against a working storno on ZK212247 that did send one.
     const rr = { ...base(), Payments: [{ PaymentType: PaymentType.Cash, Amount: 0.01 }] };
     const s = printer.validateReversalReceipt(rr);
     expect(s.Ok).toBe(true);
-    expect(s.Messages.map(m => m.Code)).toContain('W302');
-    expect(rr.Payments).toEqual([]);
+    expect(rr.Payments).toHaveLength(1);
+    expect(s.Messages.map(m => m.Code)).not.toContain('W302');
   });
 
   it('leaves every other vendor on the shared validation', () => {
