@@ -276,10 +276,60 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     try {
       const resp = await this._sendCommand(CMD.ReadDailyAmounts, iconv.encode('0', 'cp1251'));
       const str = iconv.decode(resp, 'cp1251');
-      const parts = str.split(',');
-      if (parts.length > 0) status.Amount = parseFloat(parts[0]) || 0;
+      // The device answers semicolon-separated, and the cash amount is field 1;
+      // field 0 is a leading flag. Splitting on ',' left one field whose
+      // parseFloat is the flag, so the drawer always read 0 — and the POS checks
+      // a withdrawal against this before allowing it.
+      const parts = str.split(';');
+      if (parts.length < 3) {
+        status.addError('E409', `Invalid cash response format: "${str.trim()}"`);
+      } else {
+        const amount = parts[1].trim();
+        // Some firmwares answer in whole stotinki when there is no decimal point.
+        status.Amount = amount.includes('.')
+          ? (parseFloat(amount) || 0)
+          : ((parseInt(amount, 10) || 0) / 100);
+      }
     } catch (e) {
       status.addError('E003', e.message);
+    }
+    return status;
+  }
+
+  /**
+   * Reversal validation for the Tremol family.
+   *
+   * The shared check looks only at the УНП, so two things got through to the
+   * device: a storno with no items, which printed as a 0.00 document, and an
+   * incomplete reference to the original receipt, which faults an FP-28. The
+   * reference implementation folds the full receipt checks in here and drops
+   * the payments; this override does the same.
+   *
+   * It lives on the ZFP base rather than on BgFiscalPrinter because every other
+   * vendor sits on that base and none of this is verified against their
+   * hardware.
+   */
+  validateReversalReceipt(reversalReceipt) {
+    const status = super.validateReversalReceipt(reversalReceipt);
+    if (!reversalReceipt || !status.Ok) {
+      return status;
+    }
+    if (!reversalReceipt.Items || reversalReceipt.Items.length === 0) {
+      status.addError('E210', 'Reversal receipt must have at least one item');
+    }
+    if (!reversalReceipt.ReceiptNumber) {
+      status.addError('E405', 'ReceiptNumber of the original receipt is empty');
+    }
+    if (!reversalReceipt.FiscalMemorySerialNumber) {
+      status.addError('E405', 'FiscalMemorySerialNumber of the original receipt is empty');
+    }
+    // The device reverses the original amounts itself; a payments array here is
+    // ignored by the protocol, so drop it rather than send lines that mean
+    // nothing. Warn so a caller sending them can see why they vanished.
+    if (reversalReceipt.Payments && reversalReceipt.Payments.length) {
+      status.addWarning('W302',
+        'Reversal payments are ignored by the device and have been dropped.');
+      reversalReceipt.Payments = [];
     }
     return status;
   }
