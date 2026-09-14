@@ -28,6 +28,7 @@ export const CMD = {
   CloseReceipt:               0x38,
   AbortReceipt:               0x39,
   PrintLastDuplicate:         0x3A,
+  NoFiscalRAorPO:             0x3B,
   Subtotal:                   0x33,
   PrintDailyReport:           0x7C,
   FMReportByDateDetailed:     0x7A,
@@ -222,7 +223,8 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
   async setDateTime(datetime) {
     const dt = datetime.DeviceDateTime || new Date();
     const pad2 = n => String(n).padStart(2, '0');
-    const str = `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${dt.getFullYear()} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}`;
+    const str = `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${String(dt.getFullYear()).slice(-2)}`
+      + ` ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}`;
     const status = new DeviceStatusWithDateTime();
     try {
       await this._sendCommand(CMD.SetDateTime, iconv.encode(str, 'cp1251'));
@@ -251,62 +253,78 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     return `${pad2(dt.getDate())}${pad2(dt.getMonth() + 1)}${String(dt.getFullYear()).slice(-2)}${pad2(dt.getHours())}${pad2(dt.getMinutes())}${pad2(dt.getSeconds())}`;
   }
 
+  /** "DD-MM-YY HH:MM:SS" — the form the reversal header wants. */
+  _formatReversalDateTime(dt) {
+    const pad2 = n => String(n).padStart(2, '0');
+    return `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${String(dt.getFullYear()).slice(-2)}`
+      + ` ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}:${pad2(dt.getSeconds())}`;
+  }
+
   async _openReceipt(receipt, isReversal = false, reversalReceipt = null) {
     const op = receipt.Operator || '1';
-    const pass = receipt.OperatorPassword || '';
+    const pass = receipt.OperatorPassword || '0000';
     const usn = receipt.UniqueSaleNumber || '';
-    let str;
+    let fields;
     if (isReversal && reversalReceipt) {
-      const reason = this.getReversalReasonText(reversalReceipt.Reason);
-      const dtStr = reversalReceipt.ReceiptDateTime
-        ? this._formatDateTimeForReceipt(reversalReceipt.ReceiptDateTime) : '';
-      str = `${op},${pass},${usn},S,${reversalReceipt.FiscalMemorySerialNumber || ''},${reason},${reversalReceipt.ReceiptNumber || ''},${dtStr}`;
+      // <OperNum>;<OperPass>;<ReceiptFormat>;<PrintVAT>;<StornoRcpPrintType>;
+      // <StornoReason>;<RelatedToRcpNum>;<RelatedToRcpDateTime "DD-MM-YY HH:MM:SS">;
+      // <FMNum>{;<RelatedToURN>}
+      const dt = reversalReceipt.ReceiptDateTime
+        ? this._formatReversalDateTime(new Date(reversalReceipt.ReceiptDateTime)) : '';
+      fields = [op, pass, '1', '1', 'D',
+        this.getReversalReasonText(reversalReceipt.Reason),
+        reversalReceipt.ReceiptNumber || '',
+        dt,
+        reversalReceipt.FiscalMemorySerialNumber || '',
+        usn];
     } else {
-      str = `${op},${pass},${usn}`;
+      // <OperNum>;<OperPass>;<ReceiptFormat>;<PrintVAT>;<FiscalRcpPrintType>{'$'<URN>}
+      // '1' detailed, '1' include VAT, '2' postponed printing, '$' delimits the УНП.
+      fields = [op, pass, '1', '1', `2$${usn}`];
     }
-    await this._sendCommand(CMD.OpenReceipt, iconv.encode(str, 'cp1251'));
+    await this._sendCommand(CMD.OpenReceipt, iconv.encode(fields.join(';'), 'cp1251'));
+  }
+
+  /** The ',' / ':' suffix carrying an item's discount or surcharge, or ''. */
+  _priceModifierSuffix(item) {
+    const val = item.PriceModifierValue || 0;
+    switch (item.PriceModifierType) {
+      case PriceModifierType.DiscountPercent:  return `,${(-val).toFixed(2)}`;
+      case PriceModifierType.DiscountAmount:   return `:${(-val).toFixed(2)}`;
+      case PriceModifierType.SurchargePercent: return `,${val.toFixed(2)}`;
+      case PriceModifierType.SurchargeAmount:  return `:${val.toFixed(2)}`;
+      default: return '';
+    }
   }
 
   async _addItem(item) {
-    const taxText = this.getTaxGroupText(item.TaxGroup || TaxGroup.TaxGroup1);
-    const text = withMaxLength(item.Text || '', ITEM_TEXT_MANDATORY_LENGTH);
+    // <NamePLU[36]>;<VATClass|DepNum>;<Price>{'*'<Quantity>}{','<DiscAddP>}{':'<DiscAddV>}
+    // The name is truncated to what the device prints, then padded to the
+    // mandatory 36 — a short name is a syntax error, not a short line.
+    const text = withMaxLength(item.Text || '', this.info.ItemTextMaxLength || ITEM_TEXT_MANDATORY_LENGTH);
     const paddedText = text.padEnd(ITEM_TEXT_MANDATORY_LENGTH, ' ');
-    const qty = (item.Quantity || 1).toFixed(3);
     const price = (item.UnitPrice || 0).toFixed(2);
     const dept = item.Department || 0;
+    const qty = item.Quantity || 0;
+    const tail = (qty ? `*${qty}` : '') + this._priceModifierSuffix(item);
 
+    const fb = new FrameBuilder();
+    fb.addString(`${paddedText};`);
     if (dept > 0) {
-      const fb = new FrameBuilder();
-      fb.addString(paddedText);
-      // DepNum is one raw byte = dept + 0x80 (Dep01=0x81 ... Dep19=0x93)
+      // DepNum is one raw byte = dept + 0x80 (Dep01=0x81 ... Dep19=0x93), which
+      // cannot round-trip through CP1251 text encoding.
       fb.addByte(0x80 + dept);
-      fb.addString(`\t${price}\t${qty}`);
-      await this._sendCommand(CMD.SellCorrectionDepartment, fb.build());
     } else {
-      const fb = new FrameBuilder();
-      fb.addString(paddedText);
-      const taxBuf = iconv.encode(taxText, 'cp1251');
-      fb.addByte(taxBuf[0]);
-      fb.addString(`\t${price}\t${qty}`);
-      await this._sendCommand(CMD.SellCorrection, fb.build());
+      fb.addByte(iconv.encode(this.getTaxGroupText(item.TaxGroup || TaxGroup.TaxGroup1), 'cp1251')[0]);
     }
-
-    if (item.PriceModifierType) {
-      await this._applyPriceModifier(item);
-    }
+    fb.addString(`;${price}${tail}`);
+    await this._sendCommand(dept > 0 ? CMD.SellCorrectionDepartment : CMD.SellCorrection, fb.build());
   }
 
-  async _applyPriceModifier(item) {
-    const val = (item.PriceModifierValue || 0).toFixed(2);
-    let str;
-    switch (item.PriceModifierType) {
-      case PriceModifierType.DiscountPercent:   str = `-${val}%`; break;
-      case PriceModifierType.DiscountAmount:    str = `-${val}`; break;
-      case PriceModifierType.SurchargePercent:  str = `+${val}%`; break;
-      case PriceModifierType.SurchargeAmount:   str = `+${val}`; break;
-      default: return;
-    }
-    await this._sendCommand(CMD.Subtotal, iconv.encode(str, 'cp1251'));
+  /** Discount or surcharge on the running subtotal (negative = discount). */
+  async _addSubtotalChangeAmount(amount) {
+    // <OptionPrinting>;<OptionDisplay>{':'<DiscAddV>}{','<DiscAddP>}
+    await this._sendCommand(CMD.Subtotal, iconv.encode(`1;0:${amount.toFixed(2)}`, 'cp1251'));
   }
 
   async _addComment(text) {
@@ -316,14 +334,15 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
   }
 
   async _addPayment(payment) {
-    const str = `${this.getPaymentTypeText(payment.PaymentType)}\t${(payment.Amount || 0).toFixed(2)}`;
+    // <PaymentType>;<OptionChange>;<Amount>{;<OptionChangeType>} — '1' is "no change".
+    const str = `${this.getPaymentTypeText(payment.PaymentType)};1;${(payment.Amount || 0).toFixed(2)}*`;
     await this._sendCommand(CMD.Payment, iconv.encode(str, 'cp1251'));
   }
 
   async _getLastReceiptInfo() {
     const status = new DeviceStatusWithReceiptInfo();
     try {
-      const resp = await this._sendCommand(CMD.ReadLastQR, null);
+      const resp = await this._sendCommand(CMD.ReadLastQR, iconv.encode('B', 'cp1251'));
       const qr = iconv.decode(resp, 'cp1251').trim();
       const parts = qr.split('*');
       if (parts.length >= 4) {
@@ -357,6 +376,10 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
       for (const item of receipt.Items) {
         if (item.Type === ItemType.Comment || item.Type === ItemType.FooterComment) {
           await this._addComment(item.Text);
+        } else if (item.Type === ItemType.DiscountAmount) {
+          await this._addSubtotalChangeAmount(-(item.Amount || 0));
+        } else if (item.Type === ItemType.SurchargeAmount) {
+          await this._addSubtotalChangeAmount(item.Amount || 0);
         } else {
           await this._addItem(item);
         }
@@ -380,6 +403,10 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
       for (const item of (reversalReceipt.Items || [])) {
         if (item.Type === ItemType.Comment || item.Type === ItemType.FooterComment) {
           await this._addComment(item.Text);
+        } else if (item.Type === ItemType.DiscountAmount) {
+          await this._addSubtotalChangeAmount(-(item.Amount || 0));
+        } else if (item.Type === ItemType.SurchargeAmount) {
+          await this._addSubtotalChangeAmount(item.Amount || 0);
         } else {
           await this._addItem(item);
         }
@@ -394,12 +421,25 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     return status;
   }
 
+  /**
+   * Non-fiscal cash in/out. This is its own command (0x3B), not a payment line:
+   * routing it through Payment (0x35) only makes sense inside an open receipt,
+   * so cash movements never reached the drawer.
+   */
+  async _moneyTransfer(transferAmount, signedAmount) {
+    const op = transferAmount.Operator || '1';
+    const pass = transferAmount.OperatorPassword || '0000';
+    // <OperNum>;<OperPass>;<Reserved>;<Amount>
+    const str = `${op};${pass};0;${signedAmount.toFixed(2)}`;
+    await this._sendCommand(CMD.NoFiscalRAorPO, iconv.encode(str, 'cp1251'));
+  }
+
   async printMoneyDeposit(transferAmount) {
     const validation = this.validateTransferAmount(transferAmount);
     if (!validation.Ok) return validation;
     const status = new DeviceStatusWithCashAmount();
     try {
-      await this._sendCommand(CMD.Payment, iconv.encode(`+\t${transferAmount.Amount.toFixed(2)}`, 'cp1251'));
+      await this._moneyTransfer(transferAmount, transferAmount.Amount);
       status.Amount = transferAmount.Amount;
     } catch (e) {
       status.addError('E300', e.message);
@@ -412,7 +452,7 @@ export class BgZfpFiscalPrinter extends BgFiscalPrinter {
     if (!validation.Ok) return validation;
     const status = new DeviceStatusWithCashAmount();
     try {
-      await this._sendCommand(CMD.Payment, iconv.encode(`-\t${transferAmount.Amount.toFixed(2)}`, 'cp1251'));
+      await this._moneyTransfer(transferAmount, -transferAmount.Amount);
       status.Amount = transferAmount.Amount;
     } catch (e) {
       status.addError('E300', e.message);
