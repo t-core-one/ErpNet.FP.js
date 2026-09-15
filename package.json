@@ -1,6 +1,6 @@
 {
   "name": "erpnet-fp",
-  "version": "1.0.3",
+  "version": "0.9.0",
   "description": "ErpNet Fiscal Printer service — Node.js port",
   "type": "module",
   "main": "src/index.js",
@@ -9,7 +9,9 @@
     "dev": "node --watch src/index.js",
     "emulator": "node tools/sis-emulator.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:version": "bash scripts/check-version-bump.sh origin/main HEAD",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "dependencies": {
     "express": "^4.18.2",

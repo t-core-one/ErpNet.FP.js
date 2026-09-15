@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#
+# Blocks a push whose shipped code changed without a version bump.
+#
+# Checked on PUSH rather than on commit deliberately: local work-in-progress
+# commits stay unhindered, and you can still fix it with an amend or one extra
+# commit before it reaches anyone else. What must never happen is a version
+# landing on main that does not distinguish the build.
+#
+# Enabled automatically by `npm install` (the "prepare" script sets
+# core.hooksPath). To enable by hand:  git config core.hooksPath .githooks
+set -uo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+CHECK="$ROOT/scripts/check-version-bump.sh"
+[ -x "$CHECK" ] || exit 0
+
+ZERO='0000000000000000000000000000000000000000'
+status=0
+
+# stdin: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue   # branch deletion
+
+  if [ "$remote_sha" = "$ZERO" ]; then
+    # New branch on the remote: compare against the upstream default instead of
+    # the whole of history, which would flag every new branch.
+    base=$(git rev-parse --verify --quiet origin/main 2>/dev/null) || continue
+  else
+    base="$remote_sha"
+  fi
+
+  "$CHECK" "$base" "$local_sha" || status=1
+done
+
+exit $status
