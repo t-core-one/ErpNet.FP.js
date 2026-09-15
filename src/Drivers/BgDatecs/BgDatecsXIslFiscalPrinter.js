@@ -13,7 +13,7 @@ import {
 import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
-import { withMaxLength, wrapAtLength, toDate } from '../../Helpers/Helpers.js';
+import { formatQuantity, withMaxLength, wrapAtLength, toDate } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.x.isl';
@@ -336,8 +336,22 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     const modVal = item.PriceModifierType
       ? (item.PriceModifierValue || 0).toFixed(2) : '0.00';
     // Protocol: {text}\t{taxCd}\t{price}\t{qty}\t{modType}\t{modValue}\t{dept}\t
+    //
+    // formatQuantity, NOT String(qty). A weighed line arrives from the POS
+    // carrying IEEE-754 noise -- 3.32 kg of grapes reaches us as
+    // 3.3200000000000003 -- and String() puts all 19 digits on the wire. The
+    // FP-700X answers -112104 and the receipt is aborted mid-sale, so the
+    // customer gets a voided slip reading zero while the POS order completes.
+    // Observed at a shop on 15 separate sales between 2026-09-11 and 09-15,
+    // every one of them a fractional quantity that had picked up noise; clean
+    // fractions like 2.07 went through untouched.
+    //
+    // The base driver and the P driver were fixed for exactly this after an
+    // FP-800 rejected "*1.1400000000000001" with E401. This driver reimplements
+    // _addSale for the X series' tab-separated frame and did not carry the fix
+    // across. See the cross-driver test that now pins all three.
     const str = [text, taxText, price,
-      qty !== 0 ? String(qty) : '',
+      qty !== 0 ? formatQuantity(qty) : '',
       modType, modVal, String(dept), ''].join('\t');
     await this._sendCommand(CMD.FiscalReceiptSale, str);
   }

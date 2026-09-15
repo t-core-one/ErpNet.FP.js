@@ -5,7 +5,7 @@ import { InvalidDeviceInfoException } from '../../Exceptions/InvalidDeviceInfoEx
 import { PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
-import { withMaxLength, toDate } from '../../Helpers/Helpers.js';
+import { formatQuantity, withMaxLength, toDate } from '../../Helpers/Helpers.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.c.isl';
@@ -63,7 +63,10 @@ export class BgDatecsCIslFiscalPrinter extends BgIslFiscalPrinter {
     let str = dept <= 0
       ? `${text}\t${taxText}${price}`
       : `${text}\t${dept}\t${price}`;
-    if (qty !== 0) str += `*${qty}`;
+    // formatQuantity, not `${qty}` -- template interpolation is String(), which
+    // puts IEEE-754 noise (3.3200000000000003) on the wire verbatim and gets the
+    // line rejected. Cost 15 aborted sales on the X series before it was found.
+    if (qty !== 0) str += `*${formatQuantity(qty)}`;
     if (item.PriceModifierType) {
       const val = item.PriceModifierValue || 0;
       switch (item.PriceModifierType) {

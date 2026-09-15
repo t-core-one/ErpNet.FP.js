@@ -1,6 +1,6 @@
 {
   "name": "erpnet-fp",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "ErpNet Fiscal Printer service — Node.js port",
   "type": "module",
   "main": "src/index.js",
