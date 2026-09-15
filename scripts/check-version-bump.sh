@@ -34,9 +34,6 @@ if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
 fi
 
 changed=$(git diff --name-only "$BASE".."$HEAD_REF" -- 2>/dev/null | grep -E "$SHIPPED_RE")
-if [ -z "$changed" ]; then
-  exit 0   # nothing that ships changed
-fi
 
 old=$(read_version "$BASE")
 new=$(read_version "$HEAD_REF")
@@ -48,6 +45,33 @@ fi
 
 if [ -z "$old" ]; then
   exit 0   # no baseline to compare against
+fi
+
+# A DECREASE is refused unconditionally -- before the "did anything ship?"
+# early-exit below, and regardless of what changed.
+#
+# This is checked first because that is exactly how it got through once. The
+# commit that introduced this very script carried a stray 0.9.0, left behind by
+# a throwaway test, and shipped nothing itself -- so an earlier version of this
+# check exited before it ever compared the numbers, and main went backwards
+# from 1.0.3 to 0.9.0. A version that moves backwards misidentifies a build just
+# as badly as one that never moves, and a docs-only commit is no reason to stop
+# looking.
+if [ "$old" != "$new" ] \
+   && [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | head -1)" != "$old" ]; then
+  echo
+  echo "  ✗ Version went BACKWARDS: $old -> $new"
+  echo
+  echo "    Whatever this commit changed, the version must never decrease --"
+  echo "    a lower number on a newer build makes every deployed box ambiguous."
+  echo
+  echo "    Fix: set package.json back to a version above $old."
+  echo
+  exit 1
+fi
+
+if [ -z "$changed" ]; then
+  exit 0   # nothing that ships changed
 fi
 
 # Unchanged, or moved backwards. `sort -V` orders 1.0.9 before 1.0.10 correctly,
