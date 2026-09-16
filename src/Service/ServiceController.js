@@ -188,7 +188,10 @@ export class ServiceController {
 
     this._tasks[taskId] = { status: TaskStatus.Enqueued, result: null };
     this._taskQueue.push(printJob);
-    this._processQueue();
+    // Unawaited on purpose: runAsync polls _tasks below. The .catch is what
+    // keeps a failure here from becoming an unhandled rejection, which Node 20
+    // turns into a process exit -- i.e. the whole print server gone.
+    this._processQueue().catch(e => logger.error(`task queue processor failed: ${e.message}`));
 
     const deadline = Date.now() + asyncTimeout;
     while (Date.now() < deadline) {
@@ -202,31 +205,49 @@ export class ServiceController {
   }
 
   _startTaskProcessor() {
-    this._processQueue();
+    this._processQueue().catch(e => logger.error(`task queue processor failed: ${e.message}`));
   }
 
+  /**
+   * Drain the job queue, one job at a time.
+   *
+   * `_isProcessing` is released in a `finally`, and that is load-bearing. The
+   * inner try/catch covers only `job.run()`; everything else in this method --
+   * the bookkeeping after it, and the loop itself -- ran unguarded, so a throw
+   * from any of it left the flag stuck at true. Every later call then hit the
+   * `if (this._isProcessing) return` guard and returned immediately, so the
+   * queue was never drained again: the shop could not print until someone
+   * restarted the service, with no error anywhere to say why.
+   *
+   * Nothing in here throws today, which is precisely why it was worth fixing
+   * before anything else is added -- this method is the single chokepoint every
+   * fiscal operation passes through, and it is the obvious place to hang new
+   * work like telemetry.
+   */
   async _processQueue() {
     if (this._isProcessing) return;
     this._isProcessing = true;
 
-    while (this._taskQueue.length > 0) {
-      const job = this._taskQueue.shift();
-      if (!job || !job.taskId) continue;
+    try {
+      while (this._taskQueue.length > 0) {
+        const job = this._taskQueue.shift();
+        if (!job || !job.taskId) continue;
 
-      const task = this._tasks[job.taskId];
-      if (!task) continue;
+        const task = this._tasks[job.taskId];
+        if (!task) continue;
 
-      task.status = TaskStatus.Running;
-      try {
-        task.result = await job.run();
-      } catch (e) {
-        task.result = { error: e.message };
+        task.status = TaskStatus.Running;
+        try {
+          task.result = await job.run();
+        } catch (e) {
+          task.result = { error: e.message };
+        }
+        task.status = TaskStatus.Finished;
+        task.finishedAt = Date.now();
       }
-      task.status = TaskStatus.Finished;
-      task.finishedAt = Date.now();
+    } finally {
+      this._isProcessing = false;
     }
-
-    this._isProcessing = false;
   }
 
   addPrinter(id, printer) {
