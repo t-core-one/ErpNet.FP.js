@@ -44,6 +44,16 @@ export function formatDateDDMMYY(value) {
   return `${pad2(d.getDate())}${pad2(d.getMonth() + 1)}${String(d.getFullYear()).slice(-2)}`;
 }
 
+/**
+ * DD-MM-YY — the Datecs X family (FP-700X, FMP-350X, WP-500X, DP-25X...).
+ * Same digits as the P/C dialect's DDMMYY but dash-separated; the X protocol's
+ * command 94 documents exactly this and nothing else.
+ */
+export function formatDateDashDDMMYY(value) {
+  const d = asDate(value);
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${String(d.getFullYear()).slice(-2)}`;
+}
+
 /** DDMMYYYY — ICP. A two-digit year here is silently accepted and misread. */
 export function formatDateDDMMYYYY(value) {
   const d = asDate(value);

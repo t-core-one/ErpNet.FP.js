@@ -14,10 +14,13 @@ import { ItemType, PriceModifierType, TaxGroup } from '../../Core/Item.js';
 import { PaymentType } from '../../Core/Payment.js';
 import { ReversalReason } from '../../Core/ReversalReceipt.js';
 import { formatQuantity, withMaxLength, wrapAtLength, toDate } from '../../Helpers/Helpers.js';
+import { isDetailedPeriodReport, formatDateDashDDMMYY } from '../../Helpers/periodReport.js';
 
 const SERIAL_NUMBER_PREFIXES = ['DT', 'DA'];
 const DRIVER_NAME = 'bg.dt.x.isl';
 const CMD_OPEN_STORNO = 0x2B;
+// Command 94, "Fiscal memory report by date". NOT the P/C dialect's 0x5E.
+const CMD_FM_REPORT_BY_DATE = 0x5E;
 
 /**
  * Status bits for the X series, indexed as byteIndex * 8 + bitIndex.
@@ -453,6 +456,39 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
       await this._sendCommand(CMD.PrintDailyReport, 'X\t', 3, 30000);
     } catch (e) {
       status.addError('E401', e.message);
+    }
+    return status;
+  }
+
+  /**
+   * Fiscal memory report for a custom period — X protocol, command 94 (0x5E):
+   *
+   *   {Type}<SEP>{Start}<SEP>{End}<SEP>     Type 0 short / 1 detailed, dates DD-MM-YY
+   *
+   * The inherited implementation spoke the P/C dialect: 0x4F for a short report
+   * and 0x5E for a detailed one, both with "DDMMYY,DDMMYY". The X family has no
+   * command 79 (0x4F) at all — an FP-700X answered every short request with
+   * "invalid command" and printed nothing — and its 0x5E expects a report type
+   * first, so a detailed request would have been rejected too. Same trap as the
+   * X frame and the X tax groups: this family shares the ISL command names with
+   * the P/C devices, not their parameters.
+   *
+   * One attempt, long deadline: the device prints the whole period before it
+   * answers, and a retry would print it twice.
+   */
+  async printMonthlyReport(periodReport) {
+    const invalid = this.validatePeriodReport(periodReport);
+    if (!invalid.Ok) {
+      return invalid;
+    }
+    const status = new DeviceStatusWithReceiptInfo();
+    try {
+      const start = formatDateDashDDMMYY(periodReport.StartDate || periodReport.startDate);
+      const end = formatDateDashDDMMYY(periodReport.EndDate || periodReport.endDate);
+      const type = isDetailedPeriodReport(periodReport) ? '1' : '0';
+      await this._sendCommand(CMD_FM_REPORT_BY_DATE, [type, start, end, ''].join('\t'), 1, 90000);
+    } catch (e) {
+      status.addError('E402', e.message);
     }
     return status;
   }
