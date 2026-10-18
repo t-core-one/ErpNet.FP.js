@@ -27,6 +27,7 @@ const OPEN = 0x26;
 const CLOSE = 0x27;
 const TEXT = 0x2a;
 const ABORT_FISCAL = 0x3c;
+const LAST_DOCUMENT = 0x71;
 
 /** A printer with a scripted device: `script(cmd, data, n)` may throw or return a Buffer. */
 function device(cls, info = {}, script = () => Buffer.alloc(0)) {
@@ -107,8 +108,15 @@ describe('wrapWords / layoutServiceReceipt', () => {
 });
 
 describe('Datecs P (FP-700, FP-800): commands 38 / 42 / 39', () => {
-  it('opens, prints each line as plain text, closes — and reports the slip number', async () => {
-    const { p, sent } = device(BgDatecsPIslFiscalPrinter, {}, (cmd) => (cmd === CLOSE ? Buffer.from('0127') : Buffer.alloc(0)));
+  it('opens, prints each line as plain text, closes — and reports the document number', async () => {
+    // The close answers "Allreceipt" — receipts since the last Z report, so a
+    // shop's first slip after a Z says 0001. Seen on an FP-700 and an FP-800.
+    // The document number comes from 0x71, as for a fiscal receipt.
+    const { p, sent } = device(BgDatecsPIslFiscalPrinter, {}, (cmd) => {
+      if (cmd === CLOSE) return Buffer.from('0001');
+      if (cmd === LAST_DOCUMENT) return Buffer.from('0004321');
+      return Buffer.alloc(0);
+    });
     const status = await p.printServiceReceipt({ Lines: ['РКО № 0000001', 'Сума: 150.00'] });
     expect(status.Ok).toBe(true);
     expect(sent).toEqual([
@@ -116,11 +124,25 @@ describe('Datecs P (FP-700, FP-800): commands 38 / 42 / 39', () => {
       { cmd: TEXT, data: 'РКО № 0000001' },
       { cmd: TEXT, data: 'Сума: 150.00' },
       { cmd: CLOSE, data: null },
+      { cmd: LAST_DOCUMENT, data: null },
     ]);
-    expect(status.SlipNumber).toBe('0127');
+    expect(status.SlipNumber).toBe('0004321');
     expect(status.LinesPrinted).toBe(2);
     expect(status.Printed).toBe(true);
     expect(status.Closed).toBe(true);
+  });
+
+  it('a slip that printed stays printed when the document number cannot be read', async () => {
+    const { p } = device(BgDatecsPIslFiscalPrinter, {}, (cmd) => {
+      if (cmd === LAST_DOCUMENT) throw new Error('no answer');
+      return Buffer.alloc(0);
+    });
+    const status = await p.printServiceReceipt({ Lines: ['x'] });
+    expect(status.Ok).toBe(true);
+    expect(status.Printed).toBe(true);
+    expect(status.Closed).toBe(true);
+    expect(status.SlipNumber).toBe('');
+    expect(JSON.stringify(status)).toMatch(/W704/);
   });
 
   it('wraps to the comment width minus the two "#" markers this dialect prints', async () => {
@@ -149,6 +171,7 @@ describe('Datecs X (FP-700X): commands 38 / 42 / 39', () => {
       'Сума: 150.00\t\t\t\t\t0\t',
     ]);
     expect(status.SlipNumber).toBe('1734');
+    expect(sent.map((s) => s.cmd)).not.toContain(LAST_DOCUMENT); // the X family rejects 0x71
   });
 
   it('uses the full PrintColumns−2 width — no "#" markers on this family', async () => {
@@ -193,7 +216,7 @@ describe('never leaves the device blocked', () => {
       return Buffer.alloc(0);
     });
     const status = await p.printServiceReceipt({ Lines: ['x'] });
-    expect(sent.map((s) => s.cmd)).toEqual([OPEN, CLOSE, OPEN, TEXT, CLOSE]);
+    expect(sent.map((s) => s.cmd)).toEqual([OPEN, CLOSE, OPEN, TEXT, CLOSE, LAST_DOCUMENT]);
     expect(status.Ok).toBe(true);
   });
 

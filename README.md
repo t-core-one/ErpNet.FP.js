@@ -280,8 +280,11 @@ Response: `{ ok, messages, printed, closed, slipNumber, linesPrinted }`
 - `closed: false` — this job may have left a service receipt **open** on the
   device (`E703`), and it will refuse fiscal receipts until it is closed.
   Sending the request again closes the stale slip first.
-- `slipNumber` — the device's own number for the slip; `linesPrinted` — physical
-  lines actually printed (after wrapping), also on a partial print.
+- `slipNumber` — the device's document number for the slip, the same counter
+  fiscal receipts use (read with command 113 on Datecs P, from the close answer
+  on Datecs X). If it cannot be read, the slip still counts as printed and the
+  response carries warning `W704`. `linesPrinted` — physical lines actually
+  printed (after wrapping), also on a partial print.
 
 **The service deposit/withdrawal slip cannot carry the reason.** `POST
 /printers/:id/deposit` and `/withdraw` use command 70, which on both Datecs

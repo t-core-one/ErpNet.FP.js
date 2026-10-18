@@ -514,12 +514,6 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     return [line.Text, line.Bold ? '1' : '', '', line.DoubleHeight ? '1' : '', '', alignment, ''].join('\t');
   }
 
-  /** Close answers {ErrorCode}<SEP>{SlipNumber}<SEP>. */
-  _parseSlipNumber(response) {
-    const fields = iconv.decode(response || Buffer.alloc(0), 'cp1251').split('\t');
-    return (fields[1] || '').trim();
-  }
-
   async printMoneyDeposit(transferAmount) {
     const validation = this.validateTransferAmount(transferAmount);
     if (!validation.Ok) return validation;

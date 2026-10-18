@@ -775,13 +775,6 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     return line.Text;
   }
 
-  /** The device's document number from the close answer (P/C: Allreceipt). */
-  _parseSlipNumber(response) {
-    const text = iconv.decode(response || Buffer.alloc(0), 'cp1251');
-    const m = text.match(/\d+/);
-    return m ? m[0] : '';
-  }
-
   /**
    * Print a free-text service receipt: open, every line, close — as ONE job.
    *
@@ -829,8 +822,17 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       }
       const closed = await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
       open = false;
-      status.SlipNumber = this._parseSlipNumber(closed);
       status.Printed = true;
+      // The document number, read the same way as for a fiscal receipt. NOT
+      // the P/C close answer: that is "Allreceipt", a count of receipts since
+      // the last Z report — every shop's first slip of the day would be 0001.
+      // Reading it is bookkeeping, so a failure here must not turn a printed,
+      // closed slip into an error.
+      try {
+        status.SlipNumber = await this._getLastDocumentNumber(iconv.decode(closed || Buffer.alloc(0), 'cp1251'));
+      } catch (numberError) {
+        status.addWarning('W704', `The service receipt printed, but its document number could not be read (${numberError.message})`);
+      }
     } catch (e) {
       status.addError('E702', e.message);
       if (open) {
