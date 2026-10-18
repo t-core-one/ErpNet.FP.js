@@ -13,6 +13,16 @@ const MAX_SEQUENCE = 9999999;
 // prepends the POS-centre prefix and zero-pads to the legal 10-digit width and
 // enforces the actual per-prefix ceiling. 10 digits is the absolute hard cap.
 const MAX_INVOICE_SEQUENCE = 9999999999;
+// Cash vouchers (ПКО = incoming, РКО = outgoing): one series per type per
+// device, numbered <shop prefix><counter zero-padded to `width`>, digits only.
+const VOUCHER_TYPES = {
+  PKO: 'PKO', 'ПКО': 'PKO', IN: 'PKO',
+  RKO: 'RKO', 'РКО': 'RKO', OUT: 'RKO',
+};
+const VOUCHER_LABELS = { PKO: 'ПКО', RKO: 'РКО' };
+const VOUCHER_PREFIX_REGEX = /^[0-9]{0,6}$/;
+const DEFAULT_VOUCHER_WIDTH = 6;
+const MAX_VOUCHER_WIDTH = 10;
 const STATE_VERSION = 2;
 
 // How many recently-issued idempotency keys to remember per device (retry/reload
@@ -106,6 +116,12 @@ export class UsnRegister {
       throw new Error(
         `Refusing to start: УНП state file ${this._statePath} has an unexpected shape. ` +
         `Restore it or reseed from the УНП recorded in Odoo.`
+      );
+    }
+    if (json.vouchers != null && typeof json.vouchers !== 'object') {
+      throw new Error(
+        `Refusing to start: УНП state file ${this._statePath} has an unexpected voucher section. ` +
+        `Restore it (a .bak sits next to it) or reseed the voucher numbers from Odoo.`
       );
     }
     if (!json.version) json.version = STATE_VERSION;
@@ -458,5 +474,212 @@ export class UsnRegister {
     const serial = String(serialNumber || '').trim().toUpperCase();
     const dev = this._state.devices[serial];
     return dev && dev.invoice && Array.isArray(dev.invoice.order) ? dev.invoice.order.length : 0;
+  }
+
+  // ─── Cash-voucher numbers (ПКО / РКО) ─────────────────────────────────────
+  //
+  // Each shop numbers its incoming (ПКО) and outgoing (РКО) cash vouchers in
+  // two gapless series. The fiscal device is the shop's single writer, and it is
+  // there when the internet is not, so the series lives here like the УНП does,
+  // with the same fail-closed and durability rules.
+  //
+  // Kept in a top-level `vouchers` map, NOT under `devices`: an entry in
+  // `devices` means "УНП initialized", and a voucher seed must never make a
+  // device look ready to mint УНП from 0. Older versions of this server keep the
+  // map untouched (they rewrite the whole state object), so a rollback does not
+  // lose it.
+
+  /** 'PKO' | 'RKO' for any accepted spelling, or throws. */
+  static voucherType(type) {
+    const t = VOUCHER_TYPES[String(type || '').trim().toUpperCase()];
+    if (!t) {
+      throw new Error(`Invalid voucher type "${type}" (expected ПКО/PKO or РКО/RKO)`);
+    }
+    return t;
+  }
+
+  _voucherSerial(serialNumber) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    if (!SERIAL_REGEX.test(serial)) {
+      throw new Error(`Invalid device serial "${serialNumber}" for voucher numbers (expected 2 letters + 6 digits)`);
+    }
+    return serial;
+  }
+
+  _voucherSeries(serial, type) {
+    const all = this._state.vouchers;
+    const series = all && all[serial] && all[serial][type];
+    if (!series) return null;
+    // Defensive: tolerate a hand-edited state.
+    if (!series.issued || typeof series.issued !== 'object') series.issued = {};
+    if (!Array.isArray(series.order)) series.order = Object.keys(series.issued);
+    return series;
+  }
+
+  static formatVoucherNumber(series, seq) {
+    return `${series.prefix}${String(seq).padStart(series.width, '0')}`;
+  }
+
+  isVoucherInitialized(serialNumber, type) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    return !!this._voucherSeries(serial, UsnRegister.voucherType(type));
+  }
+
+  /**
+   * Initialize or reseed one voucher series.
+   *
+   * `startSequence` is the LAST number already used (0 for a new book), so the
+   * next reservation gets startSequence + 1. Reseeding needs `force`, and is
+   * forward-only unless `allowDecrease` — also when the prefix changes, because
+   * the register cannot know whether the old prefix's numbers were ever used.
+   */
+  initializeVoucherSeries(serialNumber, type, startSequence = 0,
+    { prefix = '', width = DEFAULT_VOUCHER_WIDTH, force = false, allowDecrease = false } = {}) {
+    const serial = this._voucherSerial(serialNumber);
+    const t = UsnRegister.voucherType(type);
+    const pre = String(prefix ?? '').trim();
+    if (!VOUCHER_PREFIX_REGEX.test(pre)) {
+      throw new Error(`Invalid voucher prefix "${prefix}" (expected up to 6 digits)`);
+    }
+    const w = Number(width ?? DEFAULT_VOUCHER_WIDTH);
+    if (!Number.isInteger(w) || w < 1 || w > MAX_VOUCHER_WIDTH) {
+      throw new Error(`Invalid voucher width ${width} (expected integer 1..${MAX_VOUCHER_WIDTH})`);
+    }
+    const max = 10 ** w - 1;
+    const start = Number(startSequence);
+    if (!Number.isInteger(start) || start < 0 || start > max) {
+      throw new Error(
+        `Invalid startSequence ${startSequence} for a ${w}-digit voucher counter (expected integer 0..${max}; ` +
+        `pass the counter part only, without the prefix)`
+      );
+    }
+    const existing = this._voucherSeries(serial, t);
+    const label = VOUCHER_LABELS[t];
+    if (existing && !force) {
+      throw new Error(
+        `${label} numbering is already initialized for device ${serial} ` +
+        `(last ${UsnRegister.formatVoucherNumber(existing, existing.counter)}). Pass force=true to reseed (recovery).`
+      );
+    }
+    if (existing && start < existing.counter && !allowDecrease) {
+      throw new Error(
+        `Refusing to reseed device ${serial} ${label} counter to a LOWER value (${existing.counter} -> ${start}); ` +
+        `this would repeat voucher numbers already handed out. Reseed forward, or pass allowDecrease=true if certain.`
+      );
+    }
+    const previous = existing ? { ...existing } : null;
+    if (!this._state.vouchers || typeof this._state.vouchers !== 'object') this._state.vouchers = {};
+    const perDevice = this._state.vouchers[serial] || (this._state.vouchers[serial] = {});
+    const series = existing || { prefix: pre, width: w, counter: 0, issued: {}, order: [] };
+    Object.assign(series, { prefix: pre, width: w, counter: start });
+    perDevice[t] = series;
+    try {
+      this._persist();
+    } catch (e) {
+      if (previous) Object.assign(series, previous);
+      else delete perDevice[t];
+      if (Object.keys(perDevice).length === 0) delete this._state.vouchers[serial];
+      throw e;
+    }
+    if (previous && (previous.prefix !== pre || previous.width !== w || start < previous.counter)) {
+      logger.warn(
+        `Reseeded device ${serial} ${label} series from ${UsnRegister.formatVoucherNumber(previous, previous.counter)} ` +
+        `to ${UsnRegister.formatVoucherNumber(series, start)}`
+      );
+    }
+    logger.info(
+      `Initialized ${label} numbering for device ${serial}: last used ` +
+      `${UsnRegister.formatVoucherNumber(series, start)}${force ? ' (force/reseed)' : ''}`
+    );
+    return { serialNumber: serial, type: t, prefix: pre, width: w, counter: start };
+  }
+
+  /**
+   * Reserve (or idempotently re-return) the next voucher number of a type.
+   *
+   * Use the cash move's own id as the key and reserve BEFORE the device moves
+   * any cash: a retry, a reload or a resend after a power cut then gets the same
+   * number back instead of burning a new one.
+   *
+   * @returns {{ voucherNumber: string, sequenceNumber: number, type: string, prefix: string, reused: boolean }}
+   */
+  reserveVoucherNumber({ serialNumber, type, idempotencyKey } = {}) {
+    const serial = this._voucherSerial(serialNumber);
+    const t = UsnRegister.voucherType(type);
+    const key = String(idempotencyKey || '').trim();
+    if (!key) {
+      throw new Error('idempotencyKey is required for voucher number reservation');
+    }
+    const label = VOUCHER_LABELS[t];
+    const series = this._voucherSeries(serial, t);
+    if (!series) {
+      throw new Error(
+        `${label} numbering is not initialized for device ${serial}. Initialize it with the shop prefix ` +
+        `and the last number used (0 for a new book) before reserving. This guard prevents duplicate ` +
+        `voucher numbers after a lost state file.`
+      );
+    }
+
+    const result = (seq, reused) => ({
+      voucherNumber: UsnRegister.formatVoucherNumber(series, seq),
+      sequenceNumber: seq,
+      type: t,
+      prefix: series.prefix,
+      reused,
+    });
+    const existing = series.issued[key];
+    if (existing != null) {
+      return result(existing, true);
+    }
+    // One cash move is one voucher: the same key under the other type is a
+    // caller bug (a deposit replayed as a withdrawal), never a new number.
+    const otherType = t === 'PKO' ? 'RKO' : 'PKO';
+    const other = this._voucherSeries(serial, otherType);
+    if (other && other.issued[key] != null) {
+      throw new Error(
+        `Key ${key} already has ${VOUCHER_LABELS[otherType]} ` +
+        `${UsnRegister.formatVoucherNumber(other, other.issued[key])}; one cash move cannot have both a ПКО and a РКО`
+      );
+    }
+    const max = 10 ** series.width - 1;
+    if (series.counter >= max) {
+      throw new Error(
+        `${label} numbering exhausted for device ${serial} (reached ${UsnRegister.formatVoucherNumber(series, max)}); ` +
+        `reseed with a new prefix or a wider counter`
+      );
+    }
+    const seq = series.counter + 1;
+    series.counter = seq;
+    series.issued[key] = seq;
+    series.order.push(key);
+    try {
+      this._persist();
+    } catch (e) {
+      series.counter = seq - 1;
+      delete series.issued[key];
+      series.order.pop();
+      throw e;
+    }
+    this._prune(series);
+    logger.info(`Reserved ${label} ${UsnRegister.formatVoucherNumber(series, seq)} for device ${serial} (key=${key})`);
+    return result(seq, false);
+  }
+
+  /** Read-only view of both voucher series of a device (monitoring). */
+  voucherInfo(serialNumber) {
+    const serial = String(serialNumber || '').trim().toUpperCase();
+    const view = (t) => {
+      const series = this._voucherSeries(serial, t);
+      if (!series) return { initialized: false };
+      return {
+        initialized: true,
+        prefix: series.prefix,
+        width: series.width,
+        counter: series.counter,
+        lastNumber: series.counter > 0 ? UsnRegister.formatVoucherNumber(series, series.counter) : null,
+        issuedKeys: series.order.length,
+      };
+    };
+    return { PKO: view('PKO'), RKO: view('RKO') };
   }
 }

@@ -265,3 +265,112 @@ describe('UsnRegister invoice-number counter', () => {
     expect(reg2.reserveInvoiceNumber({ serialNumber: 'DT970048', idempotencyKey: 'b' }).invoiceNumber).toBe(2);
   });
 });
+
+describe('UsnRegister cash-voucher numbers (ПКО / РКО)', () => {
+  const SERIAL = 'DT123456';
+  const reserve = (reg, type, key) => reg.reserveVoucherNumber({ serialNumber: SERIAL, type, idempotencyKey: key });
+
+  it('refuses to reserve before the series is initialized', () => {
+    const reg = make();
+    expect(() => reserve(reg, 'РКО', 'm1')).toThrow(/not initialized/i);
+  });
+
+  it('never makes the device look УНП-initialized', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'PKO', 0, { prefix: '07' });
+    expect(reg.isDeviceInitialized(SERIAL)).toBe(false);
+    expect(() =>
+      reg.reserve({ serialNumber: SERIAL, operatorCode: '0001', idempotencyKey: 'sale' })
+    ).toThrow(/not initialized/i);
+  });
+
+  it('formats <prefix><6-digit counter>, continuing after the last number used', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'РКО', 44, { prefix: '07' });
+    const r = reserve(reg, 'RKO', 'm1');
+    expect(r).toEqual({ voucherNumber: '07000045', sequenceNumber: 45, type: 'RKO', prefix: '07', reused: false });
+  });
+
+  it('keeps ПКО and РКО as separate series', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'ПКО', 0, { prefix: '07' });
+    reg.initializeVoucherSeries(SERIAL, 'РКО', 10, { prefix: '07' });
+    expect(reserve(reg, 'PKO', 'a').voucherNumber).toBe('07000001');
+    expect(reserve(reg, 'RKO', 'b').voucherNumber).toBe('07000011');
+    expect(reserve(reg, 'in', 'c').voucherNumber).toBe('07000002');
+    expect(reserve(reg, 'out', 'd').voucherNumber).toBe('07000012');
+  });
+
+  it('returns the same number for the same cash move', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'RKO', 0, { prefix: '07' });
+    const first = reserve(reg, 'RKO', 'move-uuid');
+    const again = reserve(reg, 'РКО', 'move-uuid');
+    expect(again.voucherNumber).toBe(first.voucherNumber);
+    expect(again.reused).toBe(true);
+    expect(reserve(reg, 'RKO', 'next').sequenceNumber).toBe(2);
+  });
+
+  it('refuses one cash move as both a ПКО and a РКО', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'PKO', 0, { prefix: '07' });
+    reg.initializeVoucherSeries(SERIAL, 'RKO', 0, { prefix: '07' });
+    reserve(reg, 'PKO', 'move-uuid');
+    expect(() => reserve(reg, 'RKO', 'move-uuid')).toThrow(/both a ПКО and a РКО/);
+    expect(reg.voucherInfo(SERIAL).RKO.counter).toBe(0);
+  });
+
+  it('reseeds forward-only, needs force, and refuses invalid input', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'RKO', 5, { prefix: '07' });
+    expect(() => reg.initializeVoucherSeries(SERIAL, 'RKO', 9, { prefix: '07' })).toThrow(/force/);
+    expect(() => reg.initializeVoucherSeries(SERIAL, 'RKO', 4, { prefix: '07', force: true })).toThrow(/lower/i);
+    reg.initializeVoucherSeries(SERIAL, 'RKO', 4, { prefix: '07', force: true, allowDecrease: true });
+    expect(() => reg.initializeVoucherSeries(SERIAL, 'XKO', 0)).toThrow(/voucher type/);
+    expect(() => reg.initializeVoucherSeries(SERIAL, 'RKO', 0, { prefix: 'A1', force: true })).toThrow(/prefix/);
+    // The full number instead of the counter part is caught by the width.
+    expect(() => reg.initializeVoucherSeries(SERIAL, 'PKO', 7000045, { prefix: '07' })).toThrow(/without the prefix/);
+  });
+
+  it('applies the forward-only rule across a prefix change too', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'PKO', 30, { prefix: '07' });
+    expect(() => reg.initializeVoucherSeries(SERIAL, 'PKO', 0, { prefix: '08', force: true })).toThrow(/lower/i);
+    reg.initializeVoucherSeries(SERIAL, 'PKO', 0, { prefix: '08', force: true, allowDecrease: true });
+    expect(reserve(reg, 'PKO', 'a').voucherNumber).toBe('08000001');
+  });
+
+  it('refuses past the last number the width can hold', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'PKO', 98, { prefix: '7', width: 2 });
+    expect(reserve(reg, 'PKO', 'a').voucherNumber).toBe('799');
+    expect(() => reserve(reg, 'PKO', 'b')).toThrow(/exhausted/);
+  });
+
+  it('persists across a restart and keeps the УНП state intact', () => {
+    const reg1 = makeInitialized(SERIAL, 100);
+    reg1.initializeVoucherSeries(SERIAL, 'RKO', 0, { prefix: '07' });
+    reserve(reg1, 'RKO', 'a');
+    const reg2 = make();
+    expect(reg2.current(SERIAL)).toBe(100);
+    expect(reg2.voucherInfo(SERIAL).RKO).toMatchObject({ initialized: true, counter: 1, lastNumber: '07000001' });
+    expect(reg2.voucherInfo(SERIAL).PKO).toEqual({ initialized: false });
+    expect(reserve(reg2, 'RKO', 'a').reused).toBe(true);
+    expect(reserve(reg2, 'RKO', 'b').voucherNumber).toBe('07000002');
+  });
+
+  it('refuses to start on a damaged voucher section rather than forget it', () => {
+    fs.writeFileSync(statePath, JSON.stringify({ version: 2, devices: {}, vouchers: 'oops' }));
+    expect(() => make()).toThrow(/voucher section/);
+  });
+
+  it('rolls back when the write fails, so a retry cannot skip or repeat', () => {
+    const reg = make();
+    reg.initializeVoucherSeries(SERIAL, 'RKO', 0, { prefix: '07' });
+    const persist = reg._persist;
+    reg._persist = () => { throw new Error('disk full'); };
+    expect(() => reserve(reg, 'RKO', 'a')).toThrow(/disk full/);
+    reg._persist = persist;
+    expect(reserve(reg, 'RKO', 'a')).toMatchObject({ voucherNumber: '07000001', reused: false });
+  });
+});

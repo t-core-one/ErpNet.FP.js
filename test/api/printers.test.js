@@ -337,6 +337,88 @@ describe('POST /printers/:id/invoicenumber/init', () => {
   });
 });
 
+// ── /printers/:id/vouchernumber ───────────────────────────────────────────
+
+// A neutral serial: these tests need no particular device.
+function voucherService(overrides = {}) {
+  return makeService({
+    printers: { DT123456: {} },
+    printersInfo: { DT123456: { SerialNumber: 'DT123456', Model: 'FP-700', Manufacturer: 'Datecs' } },
+    ...overrides,
+  });
+}
+
+describe('POST /printers/:id/vouchernumber', () => {
+  it('reserves the next ПКО/РКО number via service.reserveVoucherNumber', async () => {
+    const reserveVoucherNumber = vi.fn().mockReturnValue({
+      voucherNumber: '07000045', sequenceNumber: 45, type: 'RKO', prefix: '07', reused: false,
+    });
+    const res = await request(createApp(voucherService({ reserveVoucherNumber })))
+      .post('/printers/DT123456/vouchernumber')
+      .send({ type: 'РКО', idempotencyKey: 'move-1' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      voucherNumber: '07000045', sequenceNumber: 45, type: 'RKO', prefix: '07', reused: false,
+    });
+    expect(reserveVoucherNumber).toHaveBeenCalledWith({
+      serialNumber: 'DT123456', type: 'РКО', idempotencyKey: 'move-1',
+    });
+  });
+
+  it('returns 400 when the series is not initialized', async () => {
+    const reserveVoucherNumber = vi.fn(() => { throw new Error('РКО numbering is not initialized'); });
+    const res = await request(createApp(voucherService({ reserveVoucherNumber })))
+      .post('/printers/DT123456/vouchernumber')
+      .send({ type: 'RKO', idempotencyKey: 'move-1' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not initialized/i);
+  });
+});
+
+describe('GET /printers/:id/vouchernumber', () => {
+  it('returns both series, keeping the PKO/RKO keys as they are', async () => {
+    const getVoucherNumberInfo = vi.fn().mockReturnValue({
+      serialNumber: 'DT123456',
+      PKO: { initialized: false },
+      RKO: { initialized: true, prefix: '07', width: 6, counter: 45, lastNumber: '07000045', issuedKeys: 3 },
+    });
+    const res = await request(createApp(voucherService({ getVoucherNumberInfo }))).get('/printers/DT123456/vouchernumber');
+    expect(res.status).toBe(200);
+    expect(res.body.PKO.initialized).toBe(false);
+    expect(res.body.RKO.lastNumber).toBe('07000045');
+  });
+});
+
+describe('POST /printers/:id/vouchernumber/init', () => {
+  it('seeds a series with the shop prefix and the last number used', async () => {
+    const initializeVoucherNumber = vi.fn().mockReturnValue({
+      serialNumber: 'DT123456', type: 'RKO', prefix: '07', width: 6, counter: 44,
+    });
+    const res = await request(createApp(voucherService({ initializeVoucherNumber })))
+      .post('/printers/DT123456/vouchernumber/init')
+      .send({ type: 'RKO', prefix: '07', startSequence: 44, force: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ type: 'RKO', prefix: '07', width: 6, counter: 44 });
+    expect(initializeVoucherNumber).toHaveBeenCalledWith('DT123456', 'RKO', 44, {
+      prefix: '07', width: undefined, force: true, allowDecrease: false,
+    });
+  });
+
+  it('is gated by the admin token when one is configured', async () => {
+    const initializeVoucherNumber = vi.fn();
+    process.env.USN_ADMIN_TOKEN = 'secret';
+    try {
+      const res = await request(createApp(voucherService({ initializeVoucherNumber })))
+        .post('/printers/DT123456/vouchernumber/init')
+        .send({ type: 'RKO', prefix: '07', startSequence: 0 });
+      expect(res.status).toBe(401);
+      expect(initializeVoucherNumber).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.USN_ADMIN_TOKEN;
+    }
+  });
+});
+
 // ── GET /printers/:id/status ──────────────────────────────────────────────
 
 describe('GET /printers/:id/status', () => {

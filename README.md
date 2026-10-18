@@ -253,7 +253,7 @@ Content-Type: application/json
 {
   "Lines": [
     { "Text": "РАЗХОДЕН КАСОВ ОРДЕР", "Bold": true, "Align": "center" },
-    "№ 0000000123        Дата: 18.10.2026",
+    "№ 07000123          Дата: 18.10.2026",
     "Сума: 150.00",
     "Основание: внасяне в банка",
     "",
@@ -270,8 +270,23 @@ amount); embedded newlines split a line; control characters are removed.
 Formatting is applied where the device supports it (Datecs X family) and
 ignored elsewhere; alignment is emulated with spaces where it is not native.
 
-Response: `{ ok, messages, slipNumber, linesPrinted }` — `slipNumber` is the
-device's own number for the slip.
+**Reprint:** add `"Copy": true` and the slip is marked `КОПИЕ` (centred, bold)
+before and after the lines — the device's own document number still changes.
+
+Response: `{ ok, messages, printed, closed, slipNumber, linesPrinted }`
+
+- `printed: true` — every line printed and the slip closed normally. This is the
+  only state in which the voucher is complete; anything else, print it again.
+- `closed: false` — this job may have left a service receipt **open** on the
+  device (`E703`), and it will refuse fiscal receipts until it is closed.
+  Sending the request again closes the stale slip first.
+- `slipNumber` — the device's own number for the slip; `linesPrinted` — physical
+  lines actually printed (after wrapping), also on a partial print.
+
+**The service deposit/withdrawal slip cannot carry the reason.** `POST
+/printers/:id/deposit` and `/withdraw` use command 70, which on both Datecs
+families takes only the amount (P: `[<Amount>]`, X: `{Type}<SEP>{Amount}<SEP>`).
+Print the reason on the voucher.
 
 **Why this and not `/rawrequest`:** a slip is open → lines → close. Chained as
 separate `/rawrequest` calls, anything interrupting it half way (a reload, a
@@ -293,6 +308,51 @@ cannot check content; that is the caller's responsibility.
 Errors: `E700` not supported · `E701` invalid request · `E702` device refused or
 failed · `E703` the slip could not be closed (the device will refuse fiscal
 receipts until it is).
+
+## New: Cash-voucher numbers (ПКО / РКО)
+
+Two gapless series per fiscal device — **ПКО** (incoming, `PKO`) and **РКО**
+(outgoing, `RKO`) — numbered `<prefix><counter>`, digits only: prefix `07` and
+the default 6-digit counter give `07000045`. Allocation is local to the print
+server, like the УНП, so it works while the internet is down, and it is stored
+in the same durable state file (in its own `vouchers` section — seeding a
+voucher series never makes a device look УНП-initialized).
+
+```text
+POST /printers/{printerId}/vouchernumber/init  → seed / reseed one series
+POST /printers/{printerId}/vouchernumber       → reserve the next number
+GET  /printers/{printerId}/vouchernumber       → both series' state
+```
+
+**Seed** (once per series, from the system that owns the books):
+
+```json
+POST /printers/{printerId}/vouchernumber/init
+{ "type": "РКО", "prefix": "07", "startSequence": 44 }
+→ { "serialNumber": "…", "type": "RKO", "prefix": "07", "width": 6, "counter": 44 }
+```
+
+`startSequence` is the **last number already used** (0 for a new book) — the
+counter part only, without the prefix; the next reservation gets 45. Optional
+`width` (1–10, default 6). Reseeding an initialized series needs `force: true`
+and is forward-only unless `allowDecrease: true` — also across a prefix change,
+since the register cannot know whether the old prefix's numbers were used.
+Gated by `X-USN-Admin-Token` when `USN_ADMIN_TOKEN` is set.
+
+**Reserve** — before the device moves any cash, keyed by the cash move's own id:
+
+```json
+POST /printers/{printerId}/vouchernumber
+{ "type": "RKO", "idempotencyKey": "<cash move uuid>" }
+→ { "voucherNumber": "07000045", "sequenceNumber": 45, "type": "RKO",
+    "prefix": "07", "serialNumber": "…", "reused": false }
+```
+
+The same key always returns the same number (`reused: true`), so a retry, a
+reload or a resend after a power cut never burns a second one. The same key
+under the other type is refused — one cash move is one voucher. Accepted type
+spellings: `ПКО`/`PKO`/`in` and `РКО`/`RKO`/`out`. An uninitialized series
+refuses (400) rather than invent a starting number.
 
 ## Running
 

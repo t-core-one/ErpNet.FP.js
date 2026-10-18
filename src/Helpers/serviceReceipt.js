@@ -18,12 +18,16 @@ export const MAX_SERVICE_RECEIPT_LINES = 120;
 
 const ALIGNMENTS = { left: 'left', center: 'center', centre: 'center', right: 'right' };
 
+/** Printed first and last on a reprint, so even a torn-off half says so. */
+export const COPY_MARK = 'КОПИЕ';
+
 /**
  * Validate and normalise the request into logical lines.
  *
  * Accepts `{ Lines: [...] }` (or `lines`), where each entry is a string or
  * `{ Text, Bold, DoubleHeight, Align }`. Embedded newlines split a string into
- * several lines with the same style.
+ * several lines with the same style. `Copy: true` marks a reprint: a centred
+ * "КОПИЕ" line goes before and after the caller's lines.
  *
  * Control characters are removed. They are not cosmetic here: bytes below 0x20
  * frame the ISL protocol, and TAB is the Datecs X family's field separator — a
@@ -54,6 +58,11 @@ export function normalizeServiceReceiptLines(doc) {
         .replace(/\s+$/, '');
       lines.push({ Text: clean, ...style });
     }
+  }
+  if (doc.Copy ?? doc.copy) {
+    const mark = { Text: COPY_MARK, Bold: true, DoubleHeight: true, Align: 'center' };
+    lines.unshift(mark);
+    lines.push({ ...mark });
   }
   return { lines };
 }

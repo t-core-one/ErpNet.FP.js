@@ -825,11 +825,12 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       open = true;
       for (const line of printable) {
         await this._sendCommand(CMD.PrintNonFiscalText, this._serviceReceiptTextData(line));
+        status.LinesPrinted += 1;
       }
       const closed = await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
       open = false;
       status.SlipNumber = this._parseSlipNumber(closed);
-      status.LinesPrinted = printable.length;
+      status.Printed = true;
     } catch (e) {
       status.addError('E702', e.message);
       if (open) {
@@ -837,6 +838,7 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
           await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
           status.addWarning('W702', 'The service receipt was closed early, so only part of it printed. Print it again.');
         } catch (closeError) {
+          status.Closed = false;
           status.addError('E703', `The service receipt could not be closed (${closeError.message}); `
             + 'the device will refuse fiscal receipts until it is closed.');
         }

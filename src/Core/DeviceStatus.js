@@ -81,6 +81,13 @@ export class DeviceStatusWithReceiptInfo extends DeviceStatus {
 export class DeviceStatusWithServiceReceipt extends DeviceStatus {
   constructor() {
     super();
+    // Printed: every line printed and the slip closed normally — the only
+    //   state in which the voucher is complete.
+    // Closed: false only when this job may have left a service receipt OPEN on
+    //   the device (E703); the device then refuses fiscal receipts until it is
+    //   closed. Sending the request again closes the stale slip first.
+    this.Printed = false;
+    this.Closed = true;
     this.SlipNumber = '';
     this.LinesPrinted = 0;
   }

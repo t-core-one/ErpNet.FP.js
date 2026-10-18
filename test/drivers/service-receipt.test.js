@@ -8,6 +8,7 @@ import {
   wrapWords,
   layoutServiceReceipt,
   MAX_SERVICE_RECEIPT_LINES,
+  COPY_MARK,
 } from '../../src/Helpers/serviceReceipt.js';
 import { BgDatecsPIslFiscalPrinter } from '../../src/Drivers/BgDatecs/BgDatecsPIslFiscalPrinter.js';
 import { BgDatecsXIslFiscalPrinter } from '../../src/Drivers/BgDatecs/BgDatecsXIslFiscalPrinter.js';
@@ -62,6 +63,14 @@ describe('normalizeServiceReceiptLines', () => {
     expect(lines[0].Text).toBe('Име: Иван');
   });
 
+  it('marks a reprint with a centred КОПИЕ before and after the lines', () => {
+    const { lines } = normalizeServiceReceiptLines({ Lines: ['РКО № 07000045'], Copy: true });
+    expect(lines.map((l) => l.Text)).toEqual([COPY_MARK, 'РКО № 07000045', COPY_MARK]);
+    expect(lines[0]).toMatchObject({ Bold: true, DoubleHeight: true, Align: 'center' });
+    expect(normalizeServiceReceiptLines({ lines: ['x'], copy: true }).lines).toHaveLength(3);
+    expect(normalizeServiceReceiptLines({ Lines: ['x'] }).lines).toHaveLength(1);
+  });
+
   it('refuses a missing or empty list', () => {
     expect(normalizeServiceReceiptLines({}).error).toMatch(/Lines is required/);
     expect(normalizeServiceReceiptLines({ Lines: [] }).error).toMatch(/Lines is required/);
@@ -110,6 +119,8 @@ describe('Datecs P (FP-700, FP-800): commands 38 / 42 / 39', () => {
     ]);
     expect(status.SlipNumber).toBe('0127');
     expect(status.LinesPrinted).toBe(2);
+    expect(status.Printed).toBe(true);
+    expect(status.Closed).toBe(true);
   });
 
   it('wraps to the comment width minus the two "#" markers this dialect prints', async () => {
@@ -159,6 +170,9 @@ describe('never leaves the device blocked', () => {
     const json = JSON.stringify(status);
     expect(json).toMatch(/E702/);
     expect(json).toMatch(/W702/);
+    expect(status.Printed).toBe(false);
+    expect(status.Closed).toBe(true);
+    expect(status.LinesPrinted).toBe(1);
   });
 
   it('says plainly when even the close fails — the device would refuse fiscal receipts', async () => {
@@ -168,6 +182,8 @@ describe('never leaves the device blocked', () => {
     });
     const status = await p.printServiceReceipt({ Lines: ['line 1'] });
     expect(JSON.stringify(status)).toMatch(/E703/);
+    expect(status.Printed).toBe(false);
+    expect(status.Closed).toBe(false);
   });
 
   it('clears a service receipt left open by an interrupted attempt, then prints', async () => {
@@ -191,6 +207,8 @@ describe('never leaves the device blocked', () => {
     expect(sent.map((s) => s.cmd)).toEqual([OPEN, CLOSE]);
     expect(sent.map((s) => s.cmd)).not.toContain(ABORT_FISCAL);
     expect(JSON.stringify(status)).toMatch(/fiscal receipt is open/);
+    expect(status.Printed).toBe(false);
+    expect(status.Closed).toBe(true);
   });
 });
 

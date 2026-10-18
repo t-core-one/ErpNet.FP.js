@@ -92,6 +92,27 @@ export class ServiceController {
     };
   }
 
+  // Reserve (idempotently) the next ПКО/РКО cash-voucher number. Pure local
+  // bookkeeping — offline-safe, no device or backend I/O.
+  reserveVoucherNumber({ serialNumber, type, idempotencyKey }) {
+    return this.usnRegister.reserveVoucherNumber({ serialNumber, type, idempotencyKey });
+  }
+
+  // Initialize (new book: 0) or reseed (recovery: last number used, from Odoo)
+  // one voucher series. Forward-only unless allowDecrease.
+  initializeVoucherNumber(serialNumber, type, startSequence, {
+    prefix = '', width, force = false, allowDecrease = false,
+  } = {}) {
+    return this.usnRegister.initializeVoucherSeries(serialNumber, type, startSequence, {
+      prefix, width, force, allowDecrease,
+    });
+  }
+
+  // Read-only view of a device's two voucher series (monitoring).
+  getVoucherNumberInfo(serialNumber) {
+    return { serialNumber, ...this.usnRegister.voucherInfo(serialNumber) };
+  }
+
   _ensureServerId() {
     if (this._configOptions.ServerId) return this._configOptions.ServerId;
     const id = uuidv4().replace(/-/g, '').substring(0, 22);

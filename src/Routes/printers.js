@@ -498,6 +498,85 @@ router.post('/:id/invoicenumber/init', (req, res) => {
   }
 });
 
+// GET /printers/:id/vouchernumber — read both cash-voucher series (ПКО, РКО).
+router.get('/:id/vouchernumber', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const info = service.printersInfo[req.params.id];
+  if (!info) return res.status(404).json({ error: 'Printer not found' });
+  try {
+    res.json(service.getVoucherNumberInfo(info.SerialNumber || ''));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /printers/:id/vouchernumber — reserve the next ПКО/РКО number.
+// Local, synchronous, offline-safe; idempotent by IdempotencyKey (the cash move id).
+router.post('/:id/vouchernumber', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const info = service.printersInfo[req.params.id];
+  if (!info) return res.status(404).json({ error: 'Printer not found' });
+  const { Type, IdempotencyKey } = req.body || {};
+  try {
+    const result = service.reserveVoucherNumber({
+      serialNumber: info.SerialNumber || '',
+      type: Type,
+      idempotencyKey: IdempotencyKey,
+    });
+    res.json({
+      VoucherNumber: result.voucherNumber,
+      SequenceNumber: result.sequenceNumber,
+      Type: result.type,
+      Prefix: result.prefix,
+      SerialNumber: info.SerialNumber || '',
+      Reused: result.reused,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /printers/:id/vouchernumber/init — initialize/reseed one voucher series
+// with the shop prefix and the last number used. Destructive; gated behind
+// USN_ADMIN_TOKEN when that env var is set.
+router.post('/:id/vouchernumber/init', (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const info = service.printersInfo[req.params.id];
+  if (!info) return res.status(404).json({ error: 'Printer not found' });
+  const adminToken = process.env.USN_ADMIN_TOKEN;
+  if (adminToken && req.get('x-usn-admin-token') !== adminToken) {
+    return res.status(401).json({ error: 'Invalid or missing X-USN-Admin-Token' });
+  }
+  const {
+    Type, Prefix, Width, StartSequence, Force, AllowDecrease,
+  } = req.body || {};
+  try {
+    const result = service.initializeVoucherNumber(
+      info.SerialNumber || '',
+      Type,
+      StartSequence != null ? StartSequence : 0,
+      {
+        prefix: Prefix != null ? String(Prefix) : '',
+        width: Width != null ? Width : undefined,
+        force: !!Force,
+        allowDecrease: !!AllowDecrease,
+      }
+    );
+    res.json({
+      SerialNumber: result.serialNumber,
+      Type: result.type,
+      Prefix: result.prefix,
+      Width: result.width,
+      Counter: result.counter,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // POST /printers/:id/reset
 router.post('/:id/reset', async (req, res) => {
   const service = getService(req);
