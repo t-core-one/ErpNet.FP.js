@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import printersRouter from '../../src/Routes/printers.js';
-import { PrintJobAction } from '../../src/Service/PrintJob.js';
+import { PrintJob, PrintJobAction } from '../../src/Service/PrintJob.js';
+import { DeviceStatusWithReceiptInfo } from '../../src/Core/DeviceStatus.js';
+import { BgIslFiscalPrinter, serviceReceiptOpenIn, fiscalReceiptOpenIn } from '../../src/Drivers/BgIslFiscalPrinter.js';
 import {
   normalizeServiceReceiptLines,
   wrapWords,
@@ -28,17 +30,33 @@ const CLOSE = 0x27;
 const TEXT = 0x2a;
 const ABORT_FISCAL = 0x3c;
 const LAST_DOCUMENT = 0x71;
+const GET_DATETIME = 0x3e;
 
-/** A printer with a scripted device: `script(cmd, data, n)` may throw or return a Buffer. */
+/**
+ * A printer with a scripted device: `script(cmd, data, n)` may throw or return a Buffer.
+ *
+ * Like the real devices, every answer carries status bytes, and byte 2 bit 5
+ * says whether a service receipt is open (0xa0 while open, 0x80 otherwise —
+ * as measured on an FP-700, an FP-800 and an FP-700X). A command that throws
+ * models a lost answer: the status is not updated.
+ */
 function device(cls, info = {}, script = () => Buffer.alloc(0)) {
   const p = Object.create(cls.prototype);
   p.info = { SupportsServiceReceipt: true, CommentTextMaxLength: 46, ...info };
   const sent = [];
+  const state = { slipOpen: false };
+  const report = () => {
+    p._lastStatusBytes = Buffer.from([0x88, 0x80, state.slipOpen ? 0xa0 : 0x80, 0xea, 0x86, 0x9a]);
+  };
   p._sendCommand = async (cmd, data) => {
     sent.push({ cmd, data });
-    return script(cmd, data, sent.length);
+    const answer = script(cmd, data, sent.length);
+    if (cmd === OPEN) state.slipOpen = true;
+    if (cmd === CLOSE) state.slipOpen = false;
+    report();
+    return answer;
   };
-  return { p, sent };
+  return { p, sent, state, report };
 }
 
 describe('normalizeServiceReceiptLines', () => {
@@ -232,6 +250,216 @@ describe('never leaves the device blocked', () => {
     expect(JSON.stringify(status)).toMatch(/fiscal receipt is open/);
     expect(status.Printed).toBe(false);
     expect(status.Closed).toBe(true);
+  });
+});
+
+describe('a slip left open (E703) never stops the shop selling', () => {
+  // The state after an E703: the device has a service receipt open and refuses
+  // every fiscal receipt until it is closed.
+  function blocked(script) {
+    const d = device(BgDatecsPIslFiscalPrinter, {}, script);
+    d.state.slipOpen = true;
+    d.report();
+    d.sent.length = 0;
+    return d;
+  }
+
+  it('closes it after confirming with a fresh status read', async () => {
+    const { p, sent } = blocked();
+    expect(await p.clearStaleServiceReceipt()).toEqual({ closed: true });
+    expect(sent.map((x) => x.cmd)).toEqual([GET_DATETIME, CLOSE]);
+  });
+
+  it('costs nothing when the last status shows no open slip', async () => {
+    const { p, sent } = device(BgDatecsPIslFiscalPrinter);
+    p._sendCommand(GET_DATETIME); // a keep-alive: status now known and clean
+    sent.length = 0;
+    expect(await p.clearStaleServiceReceipt()).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  it('looks once after a restart, when no status has been seen yet', async () => {
+    const { p, sent } = device(BgDatecsPIslFiscalPrinter);
+    p._lastStatusBytes = null;
+    expect(await p.clearStaleServiceReceipt()).toBeNull();
+    expect(sent.map((x) => x.cmd)).toEqual([GET_DATETIME]);
+    sent.length = 0;
+    expect(await p.clearStaleServiceReceipt()).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  it('does not close anything when the fresh read shows the slip is already gone', async () => {
+    const d = blocked();
+    d.state.slipOpen = false; // closed meanwhile, e.g. by the cashier at the device
+    expect(await d.p.clearStaleServiceReceipt()).toBeNull();
+    expect(d.sent.map((x) => x.cmd)).toEqual([GET_DATETIME]);
+  });
+
+  it('reports an error, not success, while the device still cannot close it', async () => {
+    const { p } = blocked((cmd) => {
+      if (cmd === CLOSE) throw new Error('E301 No paper');
+      return Buffer.alloc(0);
+    });
+    expect(await p.clearStaleServiceReceipt()).toEqual({ error: 'E301 No paper' });
+  });
+
+  it('trusts the device state over a refused close answer', async () => {
+    // Refused (e.g. low-paper status on the answer) but the slip did close.
+    const d = blocked((cmd) => {
+      if (cmd === CLOSE) {
+        d.state.slipOpen = false;
+        d.report();
+        throw new Error('Device rejected command 0x27');
+      }
+      return Buffer.alloc(0);
+    });
+    expect(await d.p.clearStaleServiceReceipt()).toEqual({ closed: true });
+  });
+
+  it('is a no-op on drivers without verified service receipts', async () => {
+    const { p, sent } = blocked();
+    p.info.SupportsServiceReceipt = false;
+    expect(await p.clearStaleServiceReceipt()).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  it('"Reset device" unblocks it, without aborting a fiscal receipt that is not open', async () => {
+    const { p, sent } = blocked();
+    const status = await p.reset();
+    expect(sent.map((x) => x.cmd)).toEqual([GET_DATETIME, CLOSE]);
+    expect(sent.map((x) => x.cmd)).not.toContain(ABORT_FISCAL);
+    expect(status.Ok).toBe(true);
+    expect(JSON.stringify(status)).toMatch(/W703/);
+  });
+
+  it('"Reset device" still aborts a fiscal receipt when no slip is open', async () => {
+    const { p, sent } = device(BgDatecsPIslFiscalPrinter);
+    const status = await p.reset();
+    expect(sent.map((x) => x.cmd)).toEqual([GET_DATETIME, ABORT_FISCAL]);
+    expect(status.Ok).toBe(true);
+  });
+
+  it('"Reset device" says what blocks it when the slip cannot be closed', async () => {
+    const { p, sent } = blocked((cmd) => {
+      if (cmd === CLOSE) throw new Error('E301 No paper');
+      return Buffer.alloc(0);
+    });
+    const status = await p.reset();
+    expect(status.Ok).toBe(false);
+    expect(JSON.stringify(status)).toMatch(/E703.*paper/);
+    expect(sent.map((x) => x.cmd)).not.toContain(ABORT_FISCAL);
+  });
+
+  it('a failed close whose answer shows the slip closed is not an E703', async () => {
+    const d = device(BgDatecsPIslFiscalPrinter, {}, (cmd, data) => {
+      if (cmd === TEXT && data === 'line 2') throw new Error('paper out');
+      if (cmd === CLOSE) {
+        d.state.slipOpen = false;
+        d.report();
+        throw new Error('Device rejected command 0x27');
+      }
+      return Buffer.alloc(0);
+    });
+    const status = await d.p.printServiceReceipt({ Lines: ['line 1', 'line 2'] });
+    expect(status.Closed).toBe(true);
+    expect(JSON.stringify(status)).not.toMatch(/E703/);
+    expect(JSON.stringify(status)).toMatch(/W702/);
+  });
+});
+
+describe('PrintJob closes a stale slip before jobs the device would refuse', () => {
+  function printer(stale) {
+    const receipt = new DeviceStatusWithReceiptInfo();
+    return {
+      clearStaleServiceReceipt: vi.fn(async () => {
+        if (stale instanceof Error) throw stale;
+        return stale;
+      }),
+      printReceipt: vi.fn(async () => receipt),
+      checkStatus: vi.fn(async () => new DeviceStatusWithReceiptInfo()),
+    };
+  }
+
+  it('closes it, prints the sale, and says so', async () => {
+    const p = printer({ closed: true });
+    const status = await new PrintJob({ printer: p, action: PrintJobAction.Receipt, document: {} }).run();
+    expect(p.printReceipt).toHaveBeenCalledOnce();
+    expect(status.Ok).toBe(true);
+    expect(JSON.stringify(status)).toMatch(/W703/);
+  });
+
+  it('does not attempt the sale while the slip cannot be closed', async () => {
+    const p = printer({ error: 'E301 No paper' });
+    const status = await new PrintJob({ printer: p, action: PrintJobAction.Receipt, document: {} }).run();
+    expect(p.printReceipt).not.toHaveBeenCalled();
+    expect(status.Ok).toBe(false);
+    expect(JSON.stringify(status)).toMatch(/E703.*No paper/);
+  });
+
+  it('a failing check never stops the sale', async () => {
+    const p = printer(new Error('bug'));
+    const status = await new PrintJob({ printer: p, action: PrintJobAction.Receipt, document: {} }).run();
+    expect(p.printReceipt).toHaveBeenCalledOnce();
+    expect(status.Ok).toBe(true);
+  });
+
+  it('leaves read-only jobs alone', async () => {
+    const p = printer({ closed: true });
+    await new PrintJob({ printer: p, action: PrintJobAction.Status }).run();
+    expect(p.clearStaleServiceReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('document state bits, on status bytes captured from live devices', () => {
+  const hex = (h) => Buffer.from(h, 'hex');
+  it.each([
+    ['FP-800 idle', '888080ea869a', false, false],
+    ['FP-800 during a service receipt', '8880a0ea869a', true, false],
+    ['FP-800 during a fiscal receipt', '888088ea869a', false, true],
+    ['FP-700 during a service receipt, low paper', '8880a2ea869a', true, false],
+    ['FP-700 idle, low paper', '888082ea869a', false, false],
+    ['FP-700X idle', '80808080869a8080', false, false],
+    ['FP-700X during a service receipt', '8080a080869a8080', true, false],
+  ])('%s', (_name, status, service, fiscal) => {
+    expect(serviceReceiptOpenIn(hex(status))).toBe(service);
+    expect(fiscalReceiptOpenIn(hex(status))).toBe(fiscal);
+  });
+
+  it('no status yet means no evidence of an open slip', () => {
+    expect(serviceReceiptOpenIn(null)).toBe(false);
+    expect(serviceReceiptOpenIn(Buffer.from([0x80]))).toBe(false);
+  });
+});
+
+describe('_sendCommand records the document state from every answer', () => {
+  // PREAMBLE LEN SEQ CMD [data] SEPARATOR status×6 POSTAMBLE BCC×4 TERMINATOR
+  function frame(status) {
+    return Buffer.concat([
+      Buffer.from([0x01, 0x20 + 4 + 7, 0x21, 0x4a]),
+      Buffer.from([0x04, ...status]),
+      Buffer.from([0x05, 0x30, 0x30, 0x30, 0x30, 0x03]),
+    ]);
+  }
+  function printerAnswering(status) {
+    let reads = 0;
+    const channel = {
+      write: vi.fn(),
+      read: vi.fn(async () => (reads++ === 0 ? frame(status) : Buffer.alloc(0))),
+      descriptor: 'test',
+    };
+    return new BgIslFiscalPrinter(channel, null);
+  }
+
+  it('on a normal answer', async () => {
+    const p = printerAnswering([0x88, 0x80, 0xa0, 0xea, 0x86, 0x9a]); // FP-800 mid-slip
+    await p._sendCommand(0x3e, null, 1, 200);
+    expect(serviceReceiptOpenIn(p._lastStatusBytes)).toBe(true);
+  });
+
+  it('on a refusal too — the state is still the truth', async () => {
+    const p = printerAnswering([0x88, 0x80, 0xa1, 0xea, 0x86, 0x9a]); // + out of paper
+    await expect(p._sendCommand(0x27, null, 1, 200)).rejects.toThrow(/paper/);
+    expect(serviceReceiptOpenIn(p._lastStatusBytes)).toBe(true);
   });
 });
 

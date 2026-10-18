@@ -44,6 +44,22 @@ export function describeStatusErrors(statusBytes) {
   return errors;
 }
 
+/**
+ * Document state in status byte 2, identical on the Datecs P, C and X tables:
+ * bit 3 "a fiscal receipt is open", bit 5 "a service receipt is open". Seen
+ * live on an FP-700, an FP-800 and an FP-700X: byte 2 goes 0x80 -> 0xa0 for
+ * the length of a service receipt and back on close. Only meaningful for
+ * drivers that advertise SupportsServiceReceipt — other ISL vendors' tables
+ * have not been checked.
+ */
+export function serviceReceiptOpenIn(statusBytes) {
+  return !!statusBytes && statusBytes.length > 2 && ((statusBytes[2] >> 5) & 1) === 1;
+}
+
+export function fiscalReceiptOpenIn(statusBytes) {
+  return !!statusBytes && statusBytes.length > 2 && ((statusBytes[2] >> 3) & 1) === 1;
+}
+
 // ─── Protocol constants ────────────────────────────────────────────────────
 const PREAMBLE   = 0x01;
 const POSTAMBLE  = 0x05;
@@ -84,6 +100,11 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
   constructor(channel, serviceOptions, options = null) {
     super(channel, serviceOptions, options);
     this._seqNum = 0;
+
+    // Status field of the last answer, from any command, keep-alives included.
+    // It tells whether a document is open on the device; see
+    // clearStaleServiceReceipt.
+    this._lastStatusBytes = null;
 
     // Bytes before the response payload: PREAMBLE | LEN | SEQ | CMD_ECHO, one
     // each in this dialect. BgDatecsXIslFiscalPrinter raises it to 10, matching
@@ -231,6 +252,9 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
             + `status field is ${statusBytes.length} bytes, expected ${this.statusLength}`);
           continue;
         }
+        // Recorded before the error check: a refusal still reports the
+        // device's document state truthfully.
+        this._lastStatusBytes = Buffer.from(statusBytes);
         // The payload matters as much as the status: on the Datecs X family the
         // COMMAND's result is field 0 of the data (0 = ok, negative = an error
         // code) while the status bytes only describe the PRINTER's condition.
@@ -840,9 +864,15 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
           await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
           status.addWarning('W702', 'The service receipt was closed early, so only part of it printed. Print it again.');
         } catch (closeError) {
-          status.Closed = false;
-          status.addError('E703', `The service receipt could not be closed (${closeError.message}); `
-            + 'the device will refuse fiscal receipts until it is closed.');
+          if (serviceReceiptOpenIn(this._lastStatusBytes)) {
+            status.Closed = false;
+            status.addError('E703', `The service receipt could not be closed (${closeError.message}); `
+              + 'the device will refuse fiscal receipts until it is closed. It is closed automatically '
+              + 'before the next job once the device can print (paper, power, cable).');
+          } else {
+            // The close answer was refused, yet the device reports no open slip.
+            status.addWarning('W702', 'The service receipt was closed early, so only part of it printed. Print it again.');
+          }
         }
       }
     }
@@ -870,6 +900,49 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
     }
   }
 
+  /**
+   * Close a service receipt that an interrupted print left open (E703).
+   *
+   * An open service receipt makes the device refuse every fiscal receipt, so
+   * the shop cannot sell until it is closed. PrintJob calls this before each
+   * job that needs the device; reset() calls it with `fresh` so the POS's
+   * "Reset device" button unblocks the printer too.
+   *
+   * Decided from the status bytes, never guessed: the cached status from the
+   * last answer (status polls and keep-alives keep it current) is the trigger,
+   * and a fresh read confirms before anything is closed. With no status seen
+   * yet — the first job after a restart — it reads once. Closing completes the
+   * stale slip (the device prints its footer) — there is no other way to end a
+   * service receipt. A FISCAL receipt is never touched here.
+   *
+   * @returns {null | { closed: true } | { error: string }}
+   *   null when there was nothing to do (or the driver has no service receipts).
+   */
+  async clearStaleServiceReceipt({ fresh = false } = {}) {
+    if (!this.info || !this.info.SupportsServiceReceipt) return null;
+    // No status seen yet (just restarted — possibly mid-slip) counts as "look".
+    if (!fresh && this._lastStatusBytes && !serviceReceiptOpenIn(this._lastStatusBytes)) return null;
+    try {
+      await this._sendCommand(CMD.GetDateTime, null);
+    } catch (_) {
+      // A refusal still updated the cached status; no answer at all leaves the
+      // previous one, which is the best evidence there is.
+    }
+    if (!serviceReceiptOpenIn(this._lastStatusBytes)) return null;
+    try {
+      await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
+    } catch (e) {
+      // With no paper the answer is a refusal; trust the device's own state
+      // over the refusal, as printServiceReceipt does.
+      if (serviceReceiptOpenIn(this._lastStatusBytes)) {
+        logger.warn(`A service receipt is open on the device and could not be closed: ${e.message}`);
+        return { error: e.message };
+      }
+    }
+    logger.warn('Closed a service receipt that an interrupted print had left open');
+    return { closed: true };
+  }
+
   async printDuplicate(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
     try {
@@ -882,6 +955,18 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
 
   async reset(credentials) {
     const status = new DeviceStatusWithReceiptInfo();
+    const stale = await this.clearStaleServiceReceipt({ fresh: true });
+    if (stale && stale.error) {
+      status.addError('E703', `A service receipt is open on the device and could not be closed (${stale.error}). `
+        + 'Check the paper and the power, then reset again.');
+      return status;
+    }
+    if (stale && stale.closed) {
+      status.addWarning('W703', 'Closed a service receipt that an interrupted print had left open');
+      // Nothing else was blocking the device: aborting a fiscal receipt that
+      // is not open would only turn this successful reset into an error.
+      if (!fiscalReceiptOpenIn(this._lastStatusBytes)) return status;
+    }
     try {
       await this._sendCommand(CMD.AbortFiscalReceipt, null);
     } catch (e) {

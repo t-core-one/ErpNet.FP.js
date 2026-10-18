@@ -185,6 +185,9 @@ export class BgFiscalPrinter {
   }
   reset(credentials) { throw new Error('reset must be implemented'); }
 
+  /** Close a service receipt left open by an interrupted print; see BgIslFiscalPrinter. */
+  async clearStaleServiceReceipt() { return null; }
+
   /**
    * Fiscal memory report for a custom period.
    *

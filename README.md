@@ -278,8 +278,8 @@ Response: `{ ok, messages, printed, closed, slipNumber, linesPrinted }`
 - `printed: true` — every line printed and the slip closed normally. This is the
   only state in which the voucher is complete; anything else, print it again.
 - `closed: false` — this job may have left a service receipt **open** on the
-  device (`E703`), and it will refuse fiscal receipts until it is closed.
-  Sending the request again closes the stale slip first.
+  device (`E703`), and it will refuse fiscal receipts until it is closed. See
+  *Recovery* below — the caller does not have to do anything to unblock it.
 - `slipNumber` — the device's document number for the slip, the same counter
   fiscal receipts use (read with command 113 on Datecs P, from the close answer
   on Datecs X). If it cannot be read, the slip still counts as printed and the
@@ -311,6 +311,28 @@ cannot check content; that is the caller's responsibility.
 Errors: `E700` not supported · `E701` invalid request · `E702` device refused or
 failed · `E703` the slip could not be closed (the device will refuse fiscal
 receipts until it is).
+
+**Recovery from `E703`.** The usual cause is the paper running out mid-slip:
+the device then refuses every print command, the close included, without
+changing state; or it lost power or connection. The slip stays open until the
+device can print again. The print server closes it by itself:
+
+- Before every job the device would refuse while a slip is open — receipt,
+  storno, invoice, credit note, deposit, withdrawal, X/Z/period reports,
+  duplicate, set date/time — it checks the device's status bytes (byte 2 bit 5,
+  "service receipt open", on Datecs P and X). If a slip is open it closes it
+  (the device prints the slip's footer), runs the job, and adds warning `W703`
+  to the job's response. With nothing open this costs no extra command.
+- If the slip still cannot be closed, the job is **not attempted** and
+  answers `E703` naming the reason (e.g. no paper). Fix that and retry.
+- `POST /printers/:id/reset` (the POS's *Reset device*) does the same with a
+  fresh status read, and no longer reports an error just because no fiscal
+  receipt was open to abort.
+
+So the caller's part is only this: on `printed: false`, keep the voucher as not
+printed and print it again — with a **new** `taskId` (a reused one returns the
+earlier result) and without `Copy` (the interrupted slip was never complete).
+A sale in between needs no special handling.
 
 ## New: Cash-voucher numbers (ПКО / РКО)
 
