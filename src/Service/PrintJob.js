@@ -15,6 +15,7 @@ export const PrintJobAction = Object.freeze({
   Reset: 'Reset',
   Invoice: 'Invoice',
   CreditNote: 'CreditNote',
+  ServiceReceipt: 'ServiceReceipt',
 });
 
 export const DEFAULT_TIMEOUT = 29000;
@@ -49,6 +50,7 @@ export class PrintJob {
       case PrintJobAction.Reset:           return p.reset(doc);
       case PrintJobAction.Invoice:         return p.printInvoice(doc);
       case PrintJobAction.CreditNote:      return p.printCreditNote(doc);
+      case PrintJobAction.ServiceReceipt:  return p.printServiceReceipt(doc);
       default: throw new Error(`Unknown action: ${this.action}`);
     }
   }

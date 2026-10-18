@@ -239,6 +239,61 @@ config to print the invoice on the device for to-invoice orders with a customer 
 automatically skipped (falling back to a plain receipt) when the device lacks the
 capability. The standard Odoo invoice flow remains available when the toggle is off.
 
+## New: Service receipt (СЛУЖЕБЕН БОН)
+
+`POST /printers/:id/servicereceipt` prints free text on the fiscal device,
+outside the fiscal memory — e.g. a ПКО/РКО voucher right after a cash in/out.
+The device adds its own header, footer, document number and the "СЛУЖЕБЕН БОН"
+marking; the slip is kept in its electronic journal (КЛЕН).
+
+```
+POST /printers/{printerId}/servicereceipt?taskId=<idempotent id>
+Content-Type: application/json
+
+{
+  "Lines": [
+    { "Text": "РАЗХОДЕН КАСОВ ОРДЕР", "Bold": true, "Align": "center" },
+    "№ 0000000123        Дата: 18.10.2026",
+    "Сума: 150.00",
+    "Основание: внасяне в банка",
+    "",
+    "Получил: .....................",
+    "Касиер:  ....................."
+  ]
+}
+```
+
+Each entry is a string or `{ Text, Bold, DoubleHeight, Align }` (`left` |
+`center` | `right`). Lines are wrapped at word boundaries to the device's width
+(the devices truncate long lines silently, losing the end — on a voucher, the
+amount); embedded newlines split a line; control characters are removed.
+Formatting is applied where the device supports it (Datecs X family) and
+ignored elsewhere; alignment is emulated with spaces where it is not native.
+
+Response: `{ ok, messages, slipNumber, linesPrinted }` — `slipNumber` is the
+device's own number for the slip.
+
+**Why this and not `/rawrequest`:** a slip is open → lines → close. Chained as
+separate `/rawrequest` calls, anything interrupting it half way (a reload, a
+dropped connection, a power cut) leaves a service receipt open on the device,
+which then refuses every fiscal receipt until someone closes it. This endpoint
+runs the whole slip as one queued job, closes the slip if any line fails
+(`W702`: only part printed — print again), clears a slip left open by an
+earlier interrupted attempt, and never touches an open *fiscal* receipt.
+
+**Supported on:** Datecs P (FP-700, FP-800) and Datecs X (FP-700X) — commands
+38/42/39 checked against each family's programmer's manual
+(`supportsServiceReceipt` in `/printers`). Other drivers answer `E700`.
+
+**Legal:** under Наредба Н-18 a registered device may issue service receipts
+only in expressly listed cases — documents for service-deposited/withdrawn
+amounts among them — and never for a sale or a customer order. The endpoint
+cannot check content; that is the caller's responsibility.
+
+Errors: `E700` not supported · `E701` invalid request · `E702` device refused or
+failed · `E703` the slip could not be closed (the device will refuse fiscal
+receipts until it is).
+
 ## Running
 
 ```bash

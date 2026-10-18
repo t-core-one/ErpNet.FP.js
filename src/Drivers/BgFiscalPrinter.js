@@ -1,6 +1,9 @@
 import iconv from 'iconv-lite';
 import { DeviceInfo } from '../Core/DeviceInfo.js';
-import { DeviceStatusWithReceiptInfo } from '../Core/DeviceStatus.js';
+import {
+  DeviceStatusWithReceiptInfo,
+  DeviceStatusWithServiceReceipt,
+} from '../Core/DeviceStatus.js';
 import { PaymentType } from '../Core/Payment.js';
 import { ItemType, PriceModifierType } from '../Core/Item.js';
 import { ReversalReason } from '../Core/ReversalReceipt.js';
@@ -173,6 +176,13 @@ export class BgFiscalPrinter {
   printXReport(credentials) { throw new Error('printXReport must be implemented'); }
   printDuplicate(credentials) { throw new Error('printDuplicate must be implemented'); }
   rawRequest(requestFrame) { throw new Error('rawRequest must be implemented'); }
+
+  /** Free-text service receipt (СЛУЖЕБЕН БОН). Not every protocol family has one. */
+  async printServiceReceipt(_doc) {
+    const status = new DeviceStatusWithServiceReceipt();
+    status.addError('E700', 'Service receipts are not supported by this device driver');
+    return status;
+  }
   reset(credentials) { throw new Error('reset must be implemented'); }
 
   /**

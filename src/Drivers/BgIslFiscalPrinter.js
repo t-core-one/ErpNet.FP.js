@@ -6,11 +6,13 @@ import {
   DeviceStatusWithRawResponse,
   DeviceStatusWithCashAmount,
   DeviceStatusWithReceiptInfo,
+  DeviceStatusWithServiceReceipt,
 } from '../Core/DeviceStatus.js';
 import { ItemType, PriceModifierType, TaxGroup } from '../Core/Item.js';
 import { PaymentType } from '../Core/Payment.js';
 import { isDetailedPeriodReport, formatDateDDMMYY } from '../Helpers/periodReport.js';
 import { formatQuantity, withMaxLength, wrapAtLength } from '../Helpers/Helpers.js';
+import { normalizeServiceReceiptLines, layoutServiceReceipt } from '../Helpers/serviceReceipt.js';
 import { InvalidResponseException } from '../Exceptions/InvalidResponseException.js';
 import { StandardizedStatusMessageException } from '../Exceptions/StandardizedStatusMessageException.js';
 
@@ -58,6 +60,9 @@ const CMD = {
   OpenFiscalReceipt:          0x30,
   CloseFiscalReceipt:         0x38,
   AbortFiscalReceipt:         0x3C,
+  OpenNonFiscalReceipt:       0x26,
+  CloseNonFiscalReceipt:      0x27,
+  PrintNonFiscalText:         0x2A,
   FiscalReceiptTotal:         0x35,
   FiscalReceiptComment:       0x36,
   FiscalReceiptSale:          0x31,
@@ -740,6 +745,125 @@ export class BgIslFiscalPrinter extends BgFiscalPrinter {
       status.addError('E402', e.message);
     }
     return status;
+  }
+
+  // ─── Service receipt (СЛУЖЕБЕН БОН) ──────────────────────────────────────
+
+  /**
+   * Usable characters per free-text line.
+   *
+   * The P/C dialect prints '#' at both ends of every free-text line (FP-800
+   * manual, command 42), so two columns are not ours. Narrower only costs a
+   * wrapped line; wider loses the end of the line, because the device truncates
+   * without an error.
+   */
+  serviceReceiptWidth() {
+    return Math.max(16, (this.info.CommentTextMaxLength || 42) - 2);
+  }
+
+  /** Whether the device aligns text itself; if not, layout pads with spaces. */
+  get serviceReceiptAlignsNatively() {
+    return false;
+  }
+
+  /**
+   * Data for command 42. Plain text on the P/C dialect: its font/flag prefix
+   * is documented for the FP-800 family but not verified on every model this
+   * driver serves, and a wrong prefix would print as literal text.
+   */
+  _serviceReceiptTextData(line) {
+    return line.Text;
+  }
+
+  /** The device's document number from the close answer (P/C: Allreceipt). */
+  _parseSlipNumber(response) {
+    const text = iconv.decode(response || Buffer.alloc(0), 'cp1251');
+    const m = text.match(/\d+/);
+    return m ? m[0] : '';
+  }
+
+  /**
+   * Print a free-text service receipt: open, every line, close — as ONE job.
+   *
+   * Why not let the POS chain /rawrequest calls: that is one HTTP request per
+   * command, and anything interrupting it half way (a reload, a dropped network,
+   * a power cut — all seen at a shop within weeks) leaves a service receipt OPEN
+   * on the device, which then refuses every fiscal receipt until someone closes
+   * it. Here the whole slip is one queued job, and if any line fails the slip is
+   * closed before returning, so the device is never left blocked.
+   *
+   * A lost reply cannot print a line twice: _sendCommand retries with the SAME
+   * sequence number, and both Datecs manuals say the device then re-sends its
+   * last answer instead of executing the command again.
+   *
+   * An open FISCAL receipt is never touched — the device refuses to open a
+   * service receipt over it, and that refusal is returned as an error. Aborting
+   * a customer's receipt to print a voucher would be the wrong trade.
+   */
+  async printServiceReceipt(doc) {
+    const status = new DeviceStatusWithServiceReceipt();
+    if (!this.info || !this.info.SupportsServiceReceipt) {
+      status.addError('E700', 'Service receipts are not supported, or not yet verified, on this device');
+      return status;
+    }
+    const { lines, error } = normalizeServiceReceiptLines(doc);
+    if (error) {
+      status.addError('E701', error);
+      return status;
+    }
+    let printable;
+    try {
+      printable = layoutServiceReceipt(lines, this.serviceReceiptWidth(), !this.serviceReceiptAlignsNatively);
+    } catch (e) {
+      status.addError('E701', e.message);
+      return status;
+    }
+
+    let open = false;
+    try {
+      await this._openServiceReceipt();
+      open = true;
+      for (const line of printable) {
+        await this._sendCommand(CMD.PrintNonFiscalText, this._serviceReceiptTextData(line));
+      }
+      const closed = await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
+      open = false;
+      status.SlipNumber = this._parseSlipNumber(closed);
+      status.LinesPrinted = printable.length;
+    } catch (e) {
+      status.addError('E702', e.message);
+      if (open) {
+        try {
+          await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
+          status.addWarning('W702', 'The service receipt was closed early, so only part of it printed. Print it again.');
+        } catch (closeError) {
+          status.addError('E703', `The service receipt could not be closed (${closeError.message}); `
+            + 'the device will refuse fiscal receipts until it is closed.');
+        }
+      }
+    }
+    return status;
+  }
+
+  /**
+   * Open a service receipt, clearing one left open by an interrupted attempt.
+   *
+   * A stale open service receipt makes the device refuse a new one — and every
+   * fiscal receipt. Closing it completes that stale slip (it prints its footer)
+   * and frees the device. If what blocks the open is a FISCAL receipt, the close
+   * is refused and changes nothing, and the original refusal is what we report.
+   */
+  async _openServiceReceipt() {
+    try {
+      return await this._sendCommand(CMD.OpenNonFiscalReceipt, null);
+    } catch (first) {
+      try {
+        await this._sendCommand(CMD.CloseNonFiscalReceipt, null);
+      } catch (_) {
+        throw first;
+      }
+      return this._sendCommand(CMD.OpenNonFiscalReceipt, null);
+    }
   }
 
   async printDuplicate(credentials) {

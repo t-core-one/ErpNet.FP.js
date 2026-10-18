@@ -242,6 +242,8 @@ function parseDeviceInfo(rawDeviceInfo, autoDetect) {
   info.SerialNumber = serialNumber;
   info.FiscalMemorySerialNumber = fmSerial;
   info.SupportsPeriodReport = true;
+  // Commands 38/42/39 checked against the FP-800 programmer's manual (Version1.00BG).
+  info.SupportsServiceReceipt = true;
   info.Manufacturer = 'Datecs';
   info.Model = model;
   info.FirmwareVersion = firmware;

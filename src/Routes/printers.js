@@ -103,6 +103,29 @@ router.post('/:id/rawrequest', async (req, res) => {
   }
 });
 
+// POST /printers/:id/servicereceipt
+// Free-text service receipt (СЛУЖЕБЕН БОН): body { Lines: [string | {Text, Bold,
+// DoubleHeight, Align}] }. Opens, prints and closes on the device as ONE queued
+// job, so it cannot interleave with a fiscal receipt and is never left open.
+// Use this rather than chaining /rawrequest calls — see printServiceReceipt.
+router.post('/:id/servicereceipt', async (req, res) => {
+  const service = getService(req);
+  if (!service.isReady) return notReady(res);
+  const printer = service.printers[req.params.id];
+  if (!printer) return res.status(404).json({ error: 'Printer not found' });
+  const asyncTimeout = req.query.asyncTimeout !== undefined ? parseInt(req.query.asyncTimeout, 10) : DEFAULT_TIMEOUT;
+  const timeout = req.query.timeout ? parseTimeout(req.query.timeout) : 0;
+  try {
+    const result = await service.runAsync(new PrintJob({
+      printer, action: PrintJobAction.ServiceReceipt, document: req.body,
+      asyncTimeout, timeout, taskId: req.query.taskId,
+    }));
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /printers/:id/receipt
 router.post('/:id/receipt', async (req, res) => {
   const service = getService(req);

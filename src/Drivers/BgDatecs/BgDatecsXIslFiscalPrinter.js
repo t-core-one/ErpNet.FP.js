@@ -493,6 +493,33 @@ export class BgDatecsXIslFiscalPrinter extends BgIslFiscalPrinter {
     return status;
   }
 
+  // ─── Service receipt: X protocol, commands 38 / 42 / 39 ───────────────────
+
+  /**
+   * X command 42 takes PrintColumns−2 characters, and CommentTextMaxLength is
+   * already exactly that (derived from the model's print columns). Unlike the
+   * P/C dialect, the X family prints no '#' markers, so nothing to subtract.
+   */
+  serviceReceiptWidth() {
+    return this.info.CommentTextMaxLength || 40;
+  }
+
+  get serviceReceiptAlignsNatively() {
+    return true;
+  }
+
+  /** {Text}<SEP>{Bold}<SEP>{Italic}<SEP>{Hght}<SEP>{Underline}<SEP>{alignment}<SEP> */
+  _serviceReceiptTextData(line) {
+    const alignment = { left: '0', center: '1', right: '2' }[line.Align] || '0';
+    return [line.Text, line.Bold ? '1' : '', '', line.DoubleHeight ? '1' : '', '', alignment, ''].join('\t');
+  }
+
+  /** Close answers {ErrorCode}<SEP>{SlipNumber}<SEP>. */
+  _parseSlipNumber(response) {
+    const fields = iconv.decode(response || Buffer.alloc(0), 'cp1251').split('\t');
+    return (fields[1] || '').trim();
+  }
+
   async printMoneyDeposit(transferAmount) {
     const validation = this.validateTransferAmount(transferAmount);
     if (!validation.Ok) return validation;
@@ -583,6 +610,8 @@ function parseDeviceInfo(rawDeviceInfo, autoDetect) {
   info.SerialNumber = serialNumber;
   info.FiscalMemorySerialNumber = fmSerial;
   info.SupportsPeriodReport = true;
+  // Commands 38/42/39 checked against the FMP-350X/FP-700X programmer's manual.
+  info.SupportsServiceReceipt = true;
   info.Manufacturer = 'Datecs';
   info.Model = model;
   info.FirmwareVersion = firmware;

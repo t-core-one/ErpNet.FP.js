@@ -71,3 +71,17 @@ export class DeviceStatusWithReceiptInfo extends DeviceStatus {
     this.FiscalMemorySerialNumber = '';
   }
 }
+
+/**
+ * Result of a service receipt (СЛУЖЕБЕН БОН). SlipNumber is the device's own
+ * document number for the slip, as it answered the close command — worth
+ * storing next to the voucher, since it is what the electronic journal (КЛЕН)
+ * knows the slip by. LinesPrinted counts physical lines after wrapping.
+ */
+export class DeviceStatusWithServiceReceipt extends DeviceStatus {
+  constructor() {
+    super();
+    this.SlipNumber = '';
+    this.LinesPrinted = 0;
+  }
+}
